@@ -1,5 +1,16 @@
 # Vulkan project in zig!
 
+## Building
+
+Update libraries by running 
+```bash
+cd update-manager
+./update_all.sh
+```
+
+Then run `zig build run`
+
+
 ## Third party libraries used in this project
 
 * vulkan-zig: https://github.com/Snektron/vulkan-zig.git <br>
@@ -10,13 +21,7 @@ Licensed under the MIT License.
 Licensed under the MIT License.
 
 
-## Building
+* Parts of the code borrowed from here: <br>
+https://github.com/Cy-Tek/vulkan-tutorial-zig/tree/main
 
-Update libraries by running 
-```bash
-cd update-manager
-./update_all.sh
-```
-
-Simply run `zig build run`
 

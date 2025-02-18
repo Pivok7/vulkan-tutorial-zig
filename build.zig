@@ -15,7 +15,7 @@ pub fn build(b: *std.Build) void {
     exe.linkLibC();
 
     const vulkan = b.addModule("vulkan", .{
-        .root_source_file = b.path("lib/vk_context.zig")
+        .root_source_file = b.path("lib/vk.zig")
     });
     exe.root_module.addImport("vulkan", vulkan);
 
