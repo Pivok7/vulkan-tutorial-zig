@@ -26,11 +26,12 @@ pub const VkAssert = struct {
 const apis: []const vk.ApiInfo = &.{
     .{
         .base_commands = .{
+            .getInstanceProcAddr = true,
             .createInstance = true,
             .enumerateInstanceLayerProperties = true,
-            .getInstanceProcAddr = true,
         },
         .instance_commands = .{
+            .getDeviceProcAddr = true,
             .destroyInstance = true,
             .destroySurfaceKHR = true,
             .createDevice = true,
@@ -44,6 +45,8 @@ const apis: []const vk.ApiInfo = &.{
             .getPhysicalDeviceSurfacePresentModesKHR = true,
         },
         .device_commands = .{
+            .getDeviceQueue = true,
+            .destroyDevice = true,
         }
     },
 };

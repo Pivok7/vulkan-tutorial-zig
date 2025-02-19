@@ -69,11 +69,14 @@ const HelloTriangleApplication = struct {
 
     instance_extensions: std.ArrayList([*:0]const u8) = undefined,
 
-    window: ?*glfw.Window = null,
+    window: *glfw.Window = undefined,
     instance: vk.Instance = undefined,
-
-    physical_device: ?vk.PhysicalDevice = null,
     surface: vk.SurfaceKHR = undefined,
+
+    physical_device: vk.PhysicalDevice = .null_handle,
+    device: vk.Device = undefined,
+    graphics_queue: vk.Queue = undefined,
+    present_queue: vk.Queue = undefined,
 
     //-------------------------------------------
     pub fn init(allocator: Allocator) @This() {
@@ -94,23 +97,24 @@ const HelloTriangleApplication = struct {
         try self.createInstance();
         try self.createSurface();
         try self.pickPhysicalDevice();
+        try self.createLogicalDevice();
     }
     
     pub fn deinit(self: *@This()) void {
+        self.vkd.destroyDevice(self.device, null);
         self.vki.destroySurfaceKHR(self.instance, self.surface, null);
         self.vki.destroyInstance(self.instance, null);
         std.log.info("Deinitialized Vulkan instance", .{});
 
-        glfw.destroyWindow(self.window.?);
-        std.log.info("Closed GLFW window", .{});
+        self.instance_extensions.deinit();
+
+        glfw.destroyWindow(self.window);
         glfw.terminate();
         std.log.info("Terminated GLFW", .{});
-
-        self.instance_extensions.deinit();
     }
 
     fn mainLoop(self: *@This()) !void {
-        while (!glfw.windowShouldClose(self.window.?)) {
+        while (!glfw.windowShouldClose(self.window)) {
             glfw.pollEvents();
         }
     }
@@ -157,7 +161,7 @@ const HelloTriangleApplication = struct {
     }
 
     fn createSurface(self: *@This()) !void {
-        if (vk_ctx.glfwCreateWindowSurface(self.instance, self.window.?, null, &self.surface) != vk.Result.success) {
+        if (vk_ctx.glfwCreateWindowSurface(self.instance, self.window, null, &self.surface) != vk.Result.success) {
             std.log.err("Failed to create window surface!", .{});
             return error.SurfaceCreationFail;
         }
@@ -231,7 +235,7 @@ const HelloTriangleApplication = struct {
             }
         }
 
-        if (self.physical_device == null) {
+        if (self.physical_device == .null_handle) {
             std.log.err("Failed to find a suitable GPU!", .{});
             return error.SuitableGPUNotFound;
         }
@@ -333,6 +337,60 @@ const HelloTriangleApplication = struct {
         }
 
         return details;
+    }
+
+    fn createLogicalDevice(self: *@This()) !void {
+        const indices: QueueFamilyIndices = try self.findQueueFamilies(self.physical_device);
+
+        var unique_queue_families = std.ArrayList(u32).init(self.allocator);
+        defer unique_queue_families.deinit();
+
+        const all_queue_families = &[_]u32{
+            indices.graphics_family.?,
+            indices.present_family.?
+        };
+
+        for (all_queue_families) |queue_family| {
+            for (unique_queue_families.items) |item| {
+                if (item == queue_family) {
+                    continue;
+                }
+            }
+            try unique_queue_families.append(queue_family);
+        }
+
+        var queue_create_infos = try self.allocator.alloc(vk.DeviceQueueCreateInfo, unique_queue_families.items.len);
+
+        const queue_priority: f32 = 1.0;
+        for (unique_queue_families.items, 0..) |queue_family, i| {
+            queue_create_infos[i] = vk.DeviceQueueCreateInfo{
+                .s_type = vk.StructureType.device_queue_create_info,
+                .queue_family_index = queue_family,
+                .queue_count = 1,
+                .p_queue_priorities = @ptrCast(&queue_priority),
+            };
+        }
+        
+        var device_features: vk.PhysicalDeviceFeatures = .{};        
+
+        var create_info = vk.DeviceCreateInfo{
+            .s_type = vk.StructureType.device_create_info,
+            .p_queue_create_infos = queue_create_infos.ptr,
+            .queue_create_info_count = 1,
+            .p_enabled_features = &device_features,
+            .enabled_extension_count = device_extensions.len,
+            .pp_enabled_extension_names = @ptrCast(&device_extensions),
+            .enabled_layer_count = if (self.enable_validation_layers) @intCast(validation_layers.len) else 0,
+            .pp_enabled_layer_names = if (self.enable_validation_layers) @ptrCast(&validation_layers) else null,
+        };
+
+        self.device = try self.vki.createDevice(self.physical_device, &create_info, null);
+        self.vkd = try DeviceDispatch.load(self.device, self.vki.dispatch.vkGetDeviceProcAddr);
+
+        self.graphics_queue = self.vkd.getDeviceQueue(self.device, indices.graphics_family.?, 0);
+        self.present_queue = self.vkd.getDeviceQueue(self.device, indices.present_family.?, 0);
+
+        std.log.info("Logical device created!", .{});
     }
 
 };
