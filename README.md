@@ -4,7 +4,7 @@
 
 Update libraries by running 
 ```bash
-cd update-manager
+cd update_manager
 ./update_all.sh
 ```
 
