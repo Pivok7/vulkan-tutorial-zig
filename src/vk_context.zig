@@ -47,6 +47,11 @@ const apis: []const vk.ApiInfo = &.{
         .device_commands = .{
             .getDeviceQueue = true,
             .destroyDevice = true,
+            .createSwapchainKHR = true,
+            .getSwapchainImagesKHR = true,
+            .destroySwapchainKHR = true,
+            .createImageView = true,
+            .destroyImageView = true,
         }
     },
 };

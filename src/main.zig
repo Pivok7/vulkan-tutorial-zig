@@ -56,7 +56,7 @@ const HelloTriangleApplication = struct {
     app_name: [:0]const u8 = "Vulkan App",
     allocator: Allocator = undefined,
     enable_validation_layers: bool = switch (builtin.mode) {
-        .Debug, .ReleaseSafe => true,
+        .Debug => true,
         else => false,
     },
 
@@ -71,12 +71,18 @@ const HelloTriangleApplication = struct {
 
     window: *glfw.Window = undefined,
     instance: vk.Instance = undefined,
-    surface: vk.SurfaceKHR = undefined,
 
     physical_device: vk.PhysicalDevice = .null_handle,
     device: vk.Device = undefined,
     graphics_queue: vk.Queue = undefined,
     present_queue: vk.Queue = undefined,
+    surface: vk.SurfaceKHR = undefined,
+
+    swapchain: vk.SwapchainKHR = .null_handle,
+    swapchain_images: []vk.Image = undefined,
+    swapchain_image_views: []vk.ImageView = undefined,
+    swapchain_image_format: vk.Format = undefined,
+    swapchain_extent: vk.Extent2D = undefined,
 
     //-------------------------------------------
     pub fn init(allocator: Allocator) @This() {
@@ -98,19 +104,31 @@ const HelloTriangleApplication = struct {
         try self.createSurface();
         try self.pickPhysicalDevice();
         try self.createLogicalDevice();
+        try self.createSwapChain();
+        try self.createImageViews();
+        try self.createGraphicsPipeline();
     }
     
     pub fn deinit(self: *@This()) void {
+        
+        for (self.swapchain_image_views) |image_view| {
+            self.vkd.destroyImageView(self.device, image_view, null);
+        }
+
+        self.vkd.destroySwapchainKHR(self.device, self.swapchain, null);
         self.vkd.destroyDevice(self.device, null);
         self.vki.destroySurfaceKHR(self.instance, self.surface, null);
         self.vki.destroyInstance(self.instance, null);
         std.log.info("Deinitialized Vulkan instance", .{});
 
-        self.instance_extensions.deinit();
-
         glfw.destroyWindow(self.window);
+        std.log.info("Closed GLFW window", .{});
         glfw.terminate();
-        std.log.info("Terminated GLFW", .{});
+        std.log.debug("Terminated GLFW", .{});
+
+        self.allocator.free(self.swapchain_image_views);
+        self.allocator.free(self.swapchain_images);
+        self.instance_extensions.deinit();
     }
 
     fn mainLoop(self: *@This()) !void {
@@ -121,7 +139,7 @@ const HelloTriangleApplication = struct {
 
     fn initWindow(self: *@This()) !void {
         try glfw.init();
-        std.log.info("Initialized GLFW", .{});
+        std.log.debug("Initialized GLFW", .{});
 
         glfw.windowHint(glfw.WindowHint.client_api, glfw.ClientApi.no_api);
         glfw.windowHint(glfw.WindowHint.resizable, false);
@@ -161,10 +179,8 @@ const HelloTriangleApplication = struct {
     }
 
     fn createSurface(self: *@This()) !void {
-        if (vk_ctx.glfwCreateWindowSurface(self.instance, self.window, null, &self.surface) != vk.Result.success) {
-            std.log.err("Failed to create window surface!", .{});
-            return error.SurfaceCreationFail;
-        }
+        const result = vk_ctx.glfwCreateWindowSurface(self.instance, self.window, null, &self.surface);
+        try VkAssert.withMessage(result, "Failed to create window surface!");
     }
 
     fn checkValidationLayerSupport(self: *@This()) !bool {
@@ -178,11 +194,17 @@ const HelloTriangleApplication = struct {
         result = try self.vkb.enumerateInstanceLayerProperties(&layer_count, @ptrCast(available_layers));
         try VkAssert.withMessage(result, "Failed to enumerate instance layer properties.");
 
-        // Print available layers if debug mode is on
-        if (builtin.mode == .Debug) {
-            std.debug.print("Available validation layers ({}): \n", .{layer_count});
-            for (available_layers) |layer| {
-                std.debug.print("\t{s}\n", .{layer.layer_name}); 
+        // Print validation layers if debug mode is on
+        if (builtin.mode == .Debug and validation_layers.len > 0) {
+            std.debug.print("Active validation layers ({d}): \n", .{validation_layers.len});
+            for (validation_layers) |val_layer| {
+                for (available_layers) |ava_layer| {
+                    if (c.strcmp(&ava_layer.layer_name, val_layer) == 0) {
+                        std.debug.print("\t [X] {s}\n", .{ava_layer.layer_name});
+                    } else {
+                        std.debug.print("\t [ ] {s}\n", .{ava_layer.layer_name});
+                    }
+                }
             }
         }
 
@@ -390,7 +412,137 @@ const HelloTriangleApplication = struct {
         self.graphics_queue = self.vkd.getDeviceQueue(self.device, indices.graphics_family.?, 0);
         self.present_queue = self.vkd.getDeviceQueue(self.device, indices.present_family.?, 0);
 
-        std.log.info("Logical device created!", .{});
+        std.log.debug("Created logical device", .{});
+    }
+
+    fn createSwapChain(self: *@This()) !void {
+        var swap_chain_support: SwapChainSupportDetails = try self.querySwapChainSupport(self.physical_device);
+        defer swap_chain_support.deinit();
+
+        const surface_format: vk.SurfaceFormatKHR = chooseSwapSurfaceFormat(swap_chain_support.formats.items);
+        const present_mode: vk.PresentModeKHR = chooseSwapPresentMode(swap_chain_support.present_modes.items);
+        const extent: vk.Extent2D = self.chooseSwapExtent(&swap_chain_support.capabilities);
+
+        var image_count: u32 = swap_chain_support.capabilities.min_image_count + 1;
+        if (swap_chain_support.capabilities.max_image_count > 0 and image_count > swap_chain_support.capabilities.max_image_count) {
+            image_count = swap_chain_support.capabilities.max_image_count;
+        }
+
+        const indices: QueueFamilyIndices = try self.findQueueFamilies(self.physical_device);
+        const queue_family_indices = [_]u32{indices.graphics_family.?, indices.present_family.?};
+
+        var create_info = vk.SwapchainCreateInfoKHR{
+            .s_type = .swapchain_create_info_khr,
+            .surface = self.surface,
+            .min_image_count = image_count,
+            .image_format = surface_format.format,
+            .image_color_space = surface_format.color_space,
+            .image_extent = extent,
+            .image_array_layers = 1,
+            .image_usage = .{ .color_attachment_bit = true },
+            .image_sharing_mode = undefined,
+            .pre_transform = swap_chain_support.capabilities.current_transform,
+            .composite_alpha = .{ .opaque_bit_khr = true },
+            .present_mode = present_mode,
+            .clipped = vk.TRUE,
+            .old_swapchain = .null_handle,
+        };
+
+        if (indices.graphics_family != indices.present_family) {
+            create_info.image_sharing_mode = .concurrent;
+            create_info.queue_family_index_count = 2;
+            create_info.p_queue_family_indices = @ptrCast(&queue_family_indices);
+        } else {
+            create_info.image_sharing_mode = .exclusive;
+        }
+
+        self.swapchain = try self.vkd.createSwapchainKHR(self.device, &create_info, null);
+
+        var result = try self.vkd.getSwapchainImagesKHR(self.device, self.swapchain, &image_count, null);
+        try VkAssert.withMessage(result, "Failed to get swapchain images.");
+
+        self.swapchain_images = try self.allocator.alloc(vk.Image, image_count);
+
+        result = try self.vkd.getSwapchainImagesKHR(self.device, self.swapchain, &image_count, self.swapchain_images.ptr);
+        try VkAssert.withMessage(result, "Failed to get swapchain images.");
+
+        self.swapchain_image_format = surface_format.format;
+        self.swapchain_extent = extent;
+
+        std.log.debug("Created swapchain", .{});
+    }
+
+    fn chooseSwapSurfaceFormat(available_formats: []vk.SurfaceFormatKHR) vk.SurfaceFormatKHR {
+        for (available_formats) |available_format| {
+            if (available_format.format == .b8g8r8a8_srgb and 
+                available_format.color_space == .srgb_nonlinear_khr) 
+            {
+                return available_format;
+            }
+        }
+        return available_formats[0];
+    }
+
+    fn chooseSwapPresentMode(available_present_modes: []vk.PresentModeKHR) vk.PresentModeKHR {
+        for (available_present_modes) |available_present_mode| {
+            if (available_present_mode == .mailbox_khr) {
+                return available_present_mode;
+            }
+        }
+        return .fifo_khr;
+    }
+
+    fn chooseSwapExtent(self: @This(), capabilities: *vk.SurfaceCapabilitiesKHR) vk.Extent2D {
+        if (capabilities.current_extent.width != std.math.maxInt(u32)) {
+            return capabilities.current_extent;
+        } else {
+            var width: u32 = 0;
+            var height: u32 = 0;
+            glfw.getFramebufferSize(self.window, @ptrCast(&width), @ptrCast(&height));
+
+            var actual_extent = vk.Extent2D{
+                .width = width,
+                .height = height,
+            };
+
+            actual_extent.width = std.math.clamp(actual_extent.width, capabilities.min_image_extent.width, capabilities.max_image_extent.width);
+            actual_extent.height = std.math.clamp(actual_extent.height, capabilities.min_image_extent.height, capabilities.max_image_extent.height);
+
+            return actual_extent;
+        }
+    }
+
+    fn createImageViews(self: *@This()) !void {
+        self.swapchain_image_views = try self.allocator.alloc(vk.ImageView, self.swapchain_images.len);
+
+        for (self.swapchain_images, 0..) |image, i| {
+            const create_info = vk.ImageViewCreateInfo{
+                .s_type = .image_view_create_info,
+                .image = image,
+                .view_type = .@"2d",
+                .format = self.swapchain_image_format,
+                .components = .{ 
+                    .r = .identity,
+                    .g = .identity,
+                    .b = .identity,
+                    .a = .identity,
+                },
+                .subresource_range = .{
+                    .aspect_mask = .{ .color_bit = true },
+                    .base_mip_level = 0,
+                    .level_count = 1,
+                    .base_array_layer = 0,
+                    .layer_count = 1,
+                },
+            };
+
+            self.swapchain_image_views[i] = try self.vkd.createImageView(self.device, &create_info, null);
+        }
+        std.log.debug("Created image views", .{});
+    }
+
+    fn createGraphicsPipeline(_: *@This()) !void {
+
     }
 
 };

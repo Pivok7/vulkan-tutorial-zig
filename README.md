@@ -2,7 +2,7 @@
 
 ## Building
 
-Update libraries by running 
+(optional) Update libraries by running 
 ```bash
 cd update_manager
 ./update_all.sh
