@@ -386,7 +386,7 @@ const HelloTriangleApplication = struct {
         const queue_priority: f32 = 1.0;
         for (unique_queue_families.items, 0..) |queue_family, i| {
             queue_create_infos[i] = vk.DeviceQueueCreateInfo{
-                .s_type = vk.StructureType.device_queue_create_info,
+                .s_type = .device_queue_create_info,
                 .queue_family_index = queue_family,
                 .queue_count = 1,
                 .p_queue_priorities = @ptrCast(&queue_priority),
@@ -396,7 +396,7 @@ const HelloTriangleApplication = struct {
         var device_features: vk.PhysicalDeviceFeatures = .{};        
 
         var create_info = vk.DeviceCreateInfo{
-            .s_type = vk.StructureType.device_create_info,
+            .s_type = .device_create_info,
             .p_queue_create_infos = queue_create_infos.ptr,
             .queue_create_info_count = 1,
             .p_enabled_features = &device_features,
@@ -541,10 +541,47 @@ const HelloTriangleApplication = struct {
         std.log.debug("Created image views", .{});
     }
 
-    fn createGraphicsPipeline(_: *@This()) !void {
+    fn createGraphicsPipeline(self: *@This()) !void {
+        const vert_file align(@alignOf(u32)) = @embedFile("shaders/vert.spv").*;
+        const frag_file align(@alignOf(u32)) = @embedFile("shaders/frag.spv").*;
 
+        const vert_shader_module = try self.createShaderModule(&vert_file);
+        defer self.vkd.destroyShaderModule(self.device, vert_shader_module, null);
+        std.log.debug("Created vertex shader module", .{});
+
+        const frag_shader_module = try self.createShaderModule(&frag_file);
+        defer self.vkd.destroyShaderModule(self.device, frag_shader_module, null);
+        std.log.debug("Created fragment shader module", .{});
+
+        const vert_shader_stage_info = vk.PipelineShaderStageCreateInfo{
+            .s_type = .pipeline_shader_stage_create_info,
+            .stage = .{ .vertex_bit = true },
+            .module = vert_shader_module,
+            .p_name = "main",
+        };
+
+        const frag_shader_stage_info = vk.PipelineShaderStageCreateInfo{
+            .s_type = .pipeline_shader_stage_create_info,
+            .stage = .{ .fragment_bit = true },
+            .module = frag_shader_module,
+            .p_name = "main",
+        };
+
+        const shader_stages = [_]vk.PipelineShaderStageCreateInfo{
+            vert_shader_stage_info,
+            frag_shader_stage_info,
+        };
+        _ = shader_stages;
     }
 
+    fn createShaderModule(self: @This(), code: []const u8) !vk.ShaderModule {
+        const create_info = vk.ShaderModuleCreateInfo{
+            .s_type = .shader_module_create_info,
+            .code_size = code.len,
+            .p_code = @ptrCast(@alignCast(code.ptr)),
+        };
+        return try self.vkd.createShaderModule(self.device, &create_info, null);
+    }
 };
 
 pub fn main() !void {

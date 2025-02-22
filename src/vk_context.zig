@@ -52,6 +52,8 @@ const apis: []const vk.ApiInfo = &.{
             .destroySwapchainKHR = true,
             .createImageView = true,
             .destroyImageView = true,
+            .createShaderModule = true,
+            .destroyShaderModule = true,
         }
     },
 };

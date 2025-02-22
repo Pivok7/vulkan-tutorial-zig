@@ -2,6 +2,15 @@
 
 ## Building
 
+You will need:
+
+* zig compiler (newest version)
+
+* Vulkan SDK and glslc <br>
+Check out this tutorial: https://vulkan-tutorial.com/Development_environment
+
+
+
 (optional) Update libraries by running 
 ```bash
 cd update_manager
@@ -10,6 +19,7 @@ cd update_manager
 
 Then run `zig build run`
 
+If you are on Windows and get an error related to glslc then try adding glslc.exe to you system path so that it can be invoked from cmd
 
 ## Third party libraries used in this project
 

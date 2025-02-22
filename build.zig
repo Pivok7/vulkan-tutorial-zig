@@ -47,16 +47,16 @@ pub fn build(b: *std.Build) void {
     // Shader compilation
     const compile_vert_shader = b.addSystemCommand(&.{
         "glslc",
-        "shaders/shader.vert",
+        "src/shaders/shader.vert",
         "-o",
-        "zig-out/bin/shaders/vert.spv",
+        "src/shaders/vert.spv",
     });
 
     const compile_frag_shader = b.addSystemCommand(&.{
         "glslc",
-        "shaders/shader.frag",
+        "src/shaders/shader.frag",
         "-o",
-        "zig-out/bin/shaders/frag.spv"
+        "src/shaders/frag.spv"
     });
 
     exe.step.dependOn(&compile_vert_shader.step);
