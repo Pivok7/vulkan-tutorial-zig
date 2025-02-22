@@ -84,6 +84,8 @@ const HelloTriangleApplication = struct {
     swapchain_image_format: vk.Format = undefined,
     swapchain_extent: vk.Extent2D = undefined,
 
+    pipeline_layout: vk.PipelineLayout = undefined,
+
     //-------------------------------------------
     pub fn init(allocator: Allocator) @This() {
 
@@ -110,6 +112,7 @@ const HelloTriangleApplication = struct {
     }
     
     pub fn deinit(self: *@This()) void {
+        self.vkd.destroyPipelineLayout(self.device, self.pipeline_layout, null);
         
         for (self.swapchain_image_views) |image_view| {
             self.vkd.destroyImageView(self.device, image_view, null);
@@ -571,7 +574,94 @@ const HelloTriangleApplication = struct {
             vert_shader_stage_info,
             frag_shader_stage_info,
         };
+
+        const vertex_input_info = vk.PipelineVertexInputStateCreateInfo{
+            .s_type = .pipeline_vertex_input_state_create_info,
+            .vertex_binding_description_count = 0,
+            .p_vertex_binding_descriptions = null,
+            .vertex_attribute_description_count = 0,
+            .p_vertex_attribute_descriptions = null,
+        };
+
+        const input_assembly = vk.PipelineInputAssemblyStateCreateInfo{
+            .s_type = .pipeline_input_assembly_state_create_info,
+            .topology = .triangle_list,
+            .primitive_restart_enable = vk.FALSE,
+        };
+
+        const viewport_state = vk.PipelineViewportStateCreateInfo{
+            .s_type = .pipeline_viewport_state_create_info,
+            .viewport_count = 1,
+            .scissor_count = 1,
+        };
+
+        const dynamic_states = &[_]vk.DynamicState{
+            vk.DynamicState.viewport,
+            vk.DynamicState.scissor,
+        };
+
+        const rasterizer = vk.PipelineRasterizationStateCreateInfo{
+            .s_type = .pipeline_rasterization_state_create_info,
+            .depth_clamp_enable = vk.FALSE,
+            .rasterizer_discard_enable = vk.FALSE,
+            .polygon_mode = .fill,
+            .line_width = 1.0,
+            .cull_mode = .{ .back_bit = true },
+            .front_face = .clockwise,
+            .depth_bias_enable = vk.FALSE,
+            .depth_bias_constant_factor = 0.0,
+            .depth_bias_clamp = 0.0,
+            .depth_bias_slope_factor = 0.0,
+        };
+
+        const multisampling = vk.PipelineMultisampleStateCreateInfo{
+            .s_type = .pipeline_multisample_state_create_info,
+            .sample_shading_enable = vk.FALSE,
+            .rasterization_samples = .{ .@"1_bit" = true },
+            .min_sample_shading = 1.0,
+            .p_sample_mask = null,
+            .alpha_to_coverage_enable = vk.FALSE,
+            .alpha_to_one_enable = vk.FALSE,
+        };
+
+        const color_blend_attachment = vk.PipelineColorBlendAttachmentState{
+            .color_write_mask = .{ .r_bit = true, .g_bit = true, 
+                .b_bit = true, .a_bit = true, },
+            .blend_enable = vk.FALSE,
+            .src_color_blend_factor = .one,
+            .dst_color_blend_factor = .zero,
+            .color_blend_op = .add,
+            .src_alpha_blend_factor = .one,
+            .dst_alpha_blend_factor = .zero,
+            .alpha_blend_op = .add,
+        };
+
+        const dynamic_state = vk.PipelineDynamicStateCreateInfo{
+            .s_type = .pipeline_dynamic_state_create_info,
+            .dynamic_state_count = @intCast(dynamic_states.len),
+            .p_dynamic_states = dynamic_states.ptr,
+        };
+
+        const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
+            .s_type = .pipeline_layout_create_info,
+            .set_layout_count = 0,
+            .p_set_layouts = null,
+            .push_constant_range_count = 0,
+            .p_push_constant_ranges = null,
+        };
+
+        self.pipeline_layout = try self.vkd.createPipelineLayout(self.device, &pipeline_layout_info, null);
+        std.log.debug("Created pipeline layout", .{});
+
         _ = shader_stages;
+        _ = dynamic_state;
+        _ = vertex_input_info;
+        _ = input_assembly;
+        _ = viewport_state;
+        _ = rasterizer;
+        _ = multisampling;
+        _ = color_blend_attachment;
+
     }
 
     fn createShaderModule(self: @This(), code: []const u8) !vk.ShaderModule {
