@@ -84,7 +84,9 @@ const HelloTriangleApplication = struct {
     swapchain_image_format: vk.Format = undefined,
     swapchain_extent: vk.Extent2D = undefined,
 
+    render_pass: vk.RenderPass = undefined,
     pipeline_layout: vk.PipelineLayout = undefined,
+    graphics_pipeline: vk.Pipeline = undefined,
 
     //-------------------------------------------
     pub fn init(allocator: Allocator) @This() {
@@ -108,11 +110,14 @@ const HelloTriangleApplication = struct {
         try self.createLogicalDevice();
         try self.createSwapChain();
         try self.createImageViews();
+        try self.createRenderPass();
         try self.createGraphicsPipeline();
     }
     
     pub fn deinit(self: *@This()) void {
+        self.vkd.destroyPipeline(self.device, self.graphics_pipeline, null);
         self.vkd.destroyPipelineLayout(self.device, self.pipeline_layout, null);
+        self.vkd.destroyRenderPass(self.device, self.render_pass, null);
         
         for (self.swapchain_image_views) |image_view| {
             self.vkd.destroyImageView(self.device, image_view, null);
@@ -544,6 +549,42 @@ const HelloTriangleApplication = struct {
         std.log.debug("Created image views", .{});
     }
 
+    fn createRenderPass(self: *@This()) !void {
+
+        const color_attachment = vk.AttachmentDescription{
+            .format = self.swapchain_image_format,
+            .samples = .{ .@"1_bit" = true },
+            .load_op = .clear,
+            .store_op = .store,
+            .stencil_load_op = .dont_care,
+            .stencil_store_op = .dont_care,
+            .initial_layout = .undefined,
+            .final_layout = .present_src_khr,
+        };
+
+        const color_attachment_ref = vk.AttachmentReference{
+            .attachment = 0,
+            .layout = .color_attachment_optimal,
+        };
+
+        const subpass = vk.SubpassDescription{
+            .pipeline_bind_point = .graphics,
+            .color_attachment_count = 1,
+            .p_color_attachments = @ptrCast(&color_attachment_ref),
+        };
+
+        const render_pass_info = vk.RenderPassCreateInfo{
+            .s_type = .render_pass_create_info,
+            .attachment_count = 1,
+            .p_attachments = @ptrCast(&color_attachment),
+            .subpass_count = 1,
+            .p_subpasses = @ptrCast(&subpass),
+        };
+
+        self.render_pass = try self.vkd.createRenderPass(self.device, &render_pass_info, null);
+        std.log.debug("Created render pass", .{});
+    }
+
     fn createGraphicsPipeline(self: *@This()) !void {
         const vert_file align(@alignOf(u32)) = @embedFile("shaders/vert.spv").*;
         const frag_file align(@alignOf(u32)) = @embedFile("shaders/frag.spv").*;
@@ -636,6 +677,15 @@ const HelloTriangleApplication = struct {
             .alpha_blend_op = .add,
         };
 
+        const color_blending = vk.PipelineColorBlendStateCreateInfo{
+            .s_type = .pipeline_color_blend_state_create_info,
+            .logic_op_enable = vk.FALSE,
+            .logic_op = .copy,
+            .attachment_count = 1,
+            .p_attachments = @ptrCast(&color_blend_attachment),
+            .blend_constants = .{ 0.0, 0.0, 0.0, 0.0 },
+        };
+
         const dynamic_state = vk.PipelineDynamicStateCreateInfo{
             .s_type = .pipeline_dynamic_state_create_info,
             .dynamic_state_count = @intCast(dynamic_states.len),
@@ -653,14 +703,36 @@ const HelloTriangleApplication = struct {
         self.pipeline_layout = try self.vkd.createPipelineLayout(self.device, &pipeline_layout_info, null);
         std.log.debug("Created pipeline layout", .{});
 
-        _ = shader_stages;
-        _ = dynamic_state;
-        _ = vertex_input_info;
-        _ = input_assembly;
-        _ = viewport_state;
-        _ = rasterizer;
-        _ = multisampling;
-        _ = color_blend_attachment;
+        const pipeline_info = vk.GraphicsPipelineCreateInfo{
+            .s_type = .graphics_pipeline_create_info,
+            .stage_count = 2,
+            .p_stages = @ptrCast(&shader_stages),
+            .p_vertex_input_state = &vertex_input_info,
+            .p_input_assembly_state = &input_assembly,
+            .p_viewport_state = &viewport_state,
+            .p_rasterization_state = &rasterizer,
+            .p_multisample_state = &multisampling,
+            .p_depth_stencil_state = null,
+            .p_color_blend_state = &color_blending,
+            .p_dynamic_state = &dynamic_state,
+            .layout = self.pipeline_layout,
+            .render_pass = self.render_pass,
+            .subpass = 0,
+            .base_pipeline_handle = .null_handle,
+            .base_pipeline_index = -1,
+        };
+
+        const result = try self.vkd.createGraphicsPipelines(
+            self.device,
+            .null_handle,
+            1,
+            @ptrCast(&pipeline_info),
+            null,
+            @ptrCast(&self.graphics_pipeline)
+        );
+
+        try VkAssert.withMessage(result, "Failed to create graphics pipeline");
+        std.log.debug("Created graphics pipeline", .{});
 
     }
 

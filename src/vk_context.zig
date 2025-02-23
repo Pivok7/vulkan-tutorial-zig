@@ -56,7 +56,11 @@ const apis: []const vk.ApiInfo = &.{
             .destroyShaderModule = true,
             .createPipelineLayout = true,
             .destroyPipelineLayout = true,
-        }
+            .createRenderPass = true,
+            .destroyRenderPass = true,
+            .createGraphicsPipelines = true,
+            .destroyPipeline = true,
+        },
     },
 };
 
@@ -64,7 +68,6 @@ const apis: []const vk.ApiInfo = &.{
 pub const BaseDispatch = vk.BaseWrapper(apis);
 pub const InstanceDispatch = vk.InstanceWrapper(apis);
 pub const DeviceDispatch = vk.DeviceWrapper(apis);
-
 
 pub extern fn glfwGetInstanceProcAddress(instance: vk.Instance, procname: [*:0]const u8) vk.PfnVoidFunction;
 pub extern fn glfwGetPhysicalDevicePresentationSupport(instance: vk.Instance, pdev: vk.PhysicalDevice, queuefamily: u32) c_int;
