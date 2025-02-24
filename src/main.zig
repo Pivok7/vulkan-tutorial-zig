@@ -64,11 +64,11 @@ const HelloTriangleApplication = struct {
 
     window_width: u32 = 800,
     window_height: u32 = 600, 
+    max_frames_in_flight: u32 = 2,
 
     vkb: BaseDispatch = undefined,
     vki: InstanceDispatch = undefined,
     vkd: DeviceDispatch = undefined,
-
 
     window: *glfw.Window = undefined,
     instance: vk.Instance = undefined,
@@ -91,11 +91,12 @@ const HelloTriangleApplication = struct {
     swapchain_framebuffers: []vk.Framebuffer = undefined,
 
     command_pool: vk.CommandPool = undefined,
-    command_buffer: vk.CommandBuffer = undefined,
+    command_buffers: []vk.CommandBuffer = undefined,
     
-    image_available_semaphore: vk.Semaphore = undefined,
-    render_finished_semaphore: vk.Semaphore = undefined,
-    in_flight_fence: vk.Fence = undefined,
+    current_frame: u32 = 0,
+    image_available_semaphores: []vk.Semaphore = undefined,
+    render_finished_semaphores: []vk.Semaphore = undefined,
+    in_flight_fences: []vk.Fence = undefined,
 
     //-------------------------------------------
     pub fn init(allocator: Allocator) @This() {
@@ -122,15 +123,18 @@ const HelloTriangleApplication = struct {
         try self.createRenderPass();
         try self.createGraphicsPipeline();
         try self.createFramebuffers();
-        try self.createCommendPool();
-        try self.createCommandBuffer();
+        try self.createCommandPool();
+        try self.createCommandBuffers();
         try self.createSyncObjects();
     }
     
     pub fn deinit(self: *@This()) void {
-        self.vkd.destroyFence(self.device, self.in_flight_fence, null);
-        self.vkd.destroySemaphore(self.device, self.render_finished_semaphore, null);
-        self.vkd.destroySemaphore(self.device, self.image_available_semaphore, null);
+        for (0..self.max_frames_in_flight) |i| {
+            self.vkd.destroyFence(self.device, self.in_flight_fences[i], null);
+            self.vkd.destroySemaphore(self.device, self.render_finished_semaphores[i], null);
+            self.vkd.destroySemaphore(self.device, self.image_available_semaphores[i], null);
+        }
+        
         self.vkd.destroyCommandPool(self.device, self.command_pool, null);
 
         for (self.swapchain_framebuffers) |framebuffer| {
@@ -156,6 +160,7 @@ const HelloTriangleApplication = struct {
         glfw.terminate();
         std.log.debug("Terminated GLFW", .{});
 
+        self.allocator.free(self.command_buffers);
         self.allocator.free(self.swapchain_image_views);
         self.allocator.free(self.swapchain_images);
         self.instance_extensions.deinit();
@@ -805,7 +810,7 @@ const HelloTriangleApplication = struct {
         std.log.debug("Created framebuffers", .{});
     }
 
-    fn createCommendPool(self: *@This()) !void {
+    fn createCommandPool(self: *@This()) !void {
         const queue_family_indices = try self.findQueueFamilies(self.physical_device);
 
         const pool_info = vk.CommandPoolCreateInfo{
@@ -815,17 +820,22 @@ const HelloTriangleApplication = struct {
         };
 
         self.command_pool = try self.vkd.createCommandPool(self.device, &pool_info, null);
+        std.log.debug("Created command pool", .{});
     }
 
-    fn createCommandBuffer(self: *@This()) !void {
+    fn createCommandBuffers(self: *@This()) !void {
         const alloc_info = vk.CommandBufferAllocateInfo{
             .s_type = .command_buffer_allocate_info,
             .command_pool = self.command_pool,
             .level = .primary,
-            .command_buffer_count = 1,
+            .command_buffer_count = self.max_frames_in_flight,
         };
 
-        try self.vkd.allocateCommandBuffers(self.device, &alloc_info, @ptrCast(&self.command_buffer));
+        self.command_buffers = try self.allocator.alloc(vk.CommandBuffer, self.max_frames_in_flight);
+        errdefer self.allocator.free(self.command_buffers);
+
+        try self.vkd.allocateCommandBuffers(self.device, &alloc_info, self.command_buffers.ptr);
+        std.log.debug("Created command buffers", .{});
     }
 
     fn recordCommandBuffer(self: *@This(), command_buffer: vk.CommandBuffer, image_index: u32) !void {
@@ -888,33 +898,47 @@ const HelloTriangleApplication = struct {
             .flags = .{ .signaled_bit = true },
         };
 
-        self.image_available_semaphore = try self.vkd.createSemaphore(self.device, &sempahore_info, null);
-        self.render_finished_semaphore = try self.vkd.createSemaphore(self.device, &sempahore_info, null);
-        self.in_flight_fence = try self.vkd.createFence(self.device, &fence_info, null);
+        self.image_available_semaphores = try self.allocator.alloc(vk.Semaphore, self.max_frames_in_flight);
+        errdefer self.allocator.free(self.image_available_semaphores);
+
+        self.render_finished_semaphores = try self.allocator.alloc(vk.Semaphore, self.max_frames_in_flight);
+        errdefer self.allocator.free(self.render_finished_semaphores);
+
+        self.in_flight_fences = try self.allocator.alloc(vk.Fence, self.max_frames_in_flight);
+        errdefer self.allocator.free(self.in_flight_fences);
+
+        for (0..self.max_frames_in_flight) |i| {
+            self.image_available_semaphores[i] = try self.vkd.createSemaphore(self.device, &sempahore_info, null);
+            self.render_finished_semaphores[i] = try self.vkd.createSemaphore(self.device, &sempahore_info, null);
+            self.in_flight_fences[i] = try self.vkd.createFence(self.device, &fence_info, null);
+        }
+        std.log.debug("Created sync objects", .{});
 
     }
 
     fn drawFrame(self: *@This()) !void {
-        var result = try self.vkd.waitForFences(self.device, 1, @ptrCast(&self.in_flight_fence), vk.TRUE, std.math.maxInt(u64));
+        defer self.current_frame = (self.current_frame + 1) % self.max_frames_in_flight;
+
+        var result = try self.vkd.waitForFences(self.device, 1, @ptrCast(&self.in_flight_fences[self.current_frame]), vk.TRUE, std.math.maxInt(u64));
         try VkAssert.withMessage(result, "Waiting for fence failed");
 
-        try self.vkd.resetFences(self.device, 1, @ptrCast(&self.in_flight_fence));
+        try self.vkd.resetFences(self.device, 1, @ptrCast(&self.in_flight_fences[self.current_frame]));
 
         var image_index: u32 = undefined;
         image_index = (try self.vkd.acquireNextImageKHR(
             self.device,
             self.swapchain,
             std.math.maxInt(u64),
-            self.image_available_semaphore,
+            self.image_available_semaphores[self.current_frame],
             .null_handle,
         )).image_index;
 
-        try self.vkd.resetCommandBuffer(self.command_buffer, .{});
-        try self.recordCommandBuffer(self.command_buffer, image_index);
+        try self.vkd.resetCommandBuffer(self.command_buffers[self.current_frame], .{});
+        try self.recordCommandBuffer(self.command_buffers[self.current_frame], image_index);
 
-        const wait_semaphores = [_]vk.Semaphore{self.image_available_semaphore};
+        const wait_semaphores = [_]vk.Semaphore{self.image_available_semaphores[self.current_frame]};
         const wait_stages = [_]vk.PipelineStageFlags{ .{ .color_attachment_output_bit = true} };
-        const signal_semaphores = [_]vk.Semaphore{self.render_finished_semaphore};
+        const signal_semaphores = [_]vk.Semaphore{self.render_finished_semaphores[self.current_frame]};
 
         const submit_info = vk.SubmitInfo{
             .s_type = .submit_info,
@@ -922,12 +946,12 @@ const HelloTriangleApplication = struct {
             .p_wait_semaphores = &wait_semaphores,
             .p_wait_dst_stage_mask = &wait_stages,
             .command_buffer_count = 1,
-            .p_command_buffers = @ptrCast(&self.command_buffer),
+            .p_command_buffers = @ptrCast(&self.command_buffers[self.current_frame]),
             .signal_semaphore_count = @intCast(signal_semaphores.len),
             .p_signal_semaphores = &signal_semaphores,
         };
 
-        try self.vkd.queueSubmit(self.graphics_queue, 1, @ptrCast(&submit_info), self.in_flight_fence);
+        try self.vkd.queueSubmit(self.graphics_queue, 1, @ptrCast(&submit_info), self.in_flight_fences[self.current_frame]);
 
         const swapchains = [_]vk.SwapchainKHR{self.swapchain};
 
