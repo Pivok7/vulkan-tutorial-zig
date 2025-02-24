@@ -10,7 +10,7 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const exe = b.addExecutable(.{
-        .name = "vulkan",
+        .name = "vulkan triangle",
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
@@ -29,18 +29,18 @@ pub fn build(b: *std.Build) void {
         
     }
 
-    exe.linkSystemLibrary("glfw3");
     exe.linkLibC();
+    exe.linkSystemLibrary("glfw3");
 
-    const vulkan = b.addModule("vulkan", .{
-        .root_source_file = b.path("lib/vk.zig")
-    });
+    const vulkan = b.dependency("vulkan_zig", .{
+        .registry = b.path("vk_source/vk.xml"),
+    }).module("vulkan-zig");
     exe.root_module.addImport("vulkan", vulkan);
 
-    const zglfw = b.addModule("zglfw", .{
-        .root_source_file = b.path("lib/zglfw.zig")
+    const zglfw = b.dependency("zglfw", .{
+        .target = target,
     });
-    exe.root_module.addImport("zglfw", zglfw);
+    exe.root_module.addImport("zglfw", zglfw.module("root"));
     
     b.installArtifact(exe);
 

@@ -1,0 +1,16 @@
+.{
+    .paths = .{""},
+    .name = "vulkan-triangle",
+    .version = "1.0.0",
+
+    .dependencies = .{
+        .zglfw = .{
+            .url = "https://github.com/zig-gamedev/zglfw/archive/e9bd486903b5904b6d4e27b8b3771b138a667ef1.tar.gz",
+            .hash = "12209fb981e7aab58c2f9062ab526bd43df3d7953aa41e131a173c37ad35d10b1132",
+        },
+        .vulkan_zig = .{
+            .url = "https://github.com/Snektron/vulkan-zig/archive/604416bf44baf95568c428e1aa55499aa8e07607.tar.gz",
+            .hash = "1220129ea1652cc0f8578db3dcba254bc9fbc6fdd195b5e1021bf4da8592ea5dc9fb",
+        },
+    },
+}

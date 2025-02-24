@@ -9,12 +9,10 @@ You will need:
 * Vulkan SDK and glslc <br>
 Check out this tutorial: https://vulkan-tutorial.com/Development_environment
 
-
-
-(optional) Update libraries by running 
+(optional) Update vk.xml by running 
 ```bash
-cd update_manager
-./update_all.sh
+cd vk_source
+./update_xml.sh
 ```
 
 Then run `zig build run`
