@@ -127,7 +127,7 @@ pub const API_VERSION_1_2 = makeApiVersion(0, 1, 2, 0);
 pub const API_VERSION_1_3 = makeApiVersion(0, 1, 3, 0);
 pub const API_VERSION_1_4 = makeApiVersion(0, 1, 4, 0);
 pub const VKSC_API_VERSION_1_0 = makeApiVersion(VKSC_API_VARIANT, 1, 0, 0);
-pub const HEADER_VERSION = 307;
+pub const HEADER_VERSION = 309;
 pub const HEADER_VERSION_COMPLETE = makeApiVersion(0, 1, 4, HEADER_VERSION);
 pub const Display = if (@hasDecl(root, "Display")) root.Display else opaque {};
 pub const VisualID = if (@hasDecl(root, "VisualID")) root.VisualID else c_uint;
@@ -9990,6 +9990,17 @@ pub const ConvertCooperativeVectorMatrixInfoNV = extern struct {
     dst_layout: CooperativeVectorMatrixLayoutNV,
     dst_stride: usize,
 };
+pub const SetPresentConfigNV = extern struct {
+    s_type: StructureType = .set_present_config_nv,
+    p_next: ?*const anyopaque = null,
+    num_frames_per_batch: u32,
+    present_config_feedback: u32,
+};
+pub const PhysicalDevicePresentMeteringFeaturesNV = extern struct {
+    s_type: StructureType = .physical_device_present_metering_features_nv,
+    p_next: ?*anyopaque = null,
+    present_metering: Bool32 = FALSE,
+};
 pub const ImageLayout = enum(i32) {
     undefined = 0,
     general = 1,
@@ -11732,6 +11743,8 @@ pub const StructureType = enum(i32) {
     memory_get_metal_handle_info_ext = 1000602002,
     physical_device_depth_clamp_zero_one_features_khr = 1000421000,
     physical_device_vertex_attribute_robustness_features_ext = 1000608000,
+    set_present_config_nv = 1000613000,
+    physical_device_present_metering_features_nv = 1000613001,
     _,
     pub const physical_device_variable_pointer_features = StructureType.physical_device_variable_pointers_features;
     pub const physical_device_shader_draw_parameter_features = StructureType.physical_device_shader_draw_parameters_features;
@@ -26919,6 +26932,13 @@ pub const extensions = struct {
     };
     pub const ext_vertex_attribute_robustness = ApiInfo{
         .name = "VK_EXT_vertex_attribute_robustness",
+        .version = 1,
+        .base_commands = .{},
+        .instance_commands = .{},
+        .device_commands = .{},
+    };
+    pub const nv_present_metering = ApiInfo{
+        .name = "VK_NV_present_metering",
         .version = 1,
         .base_commands = .{},
         .instance_commands = .{},

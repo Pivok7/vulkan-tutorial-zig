@@ -55,6 +55,8 @@ const SwapChainSupportDetails = struct {
 const HelloTriangleApplication = struct {
     app_name: [:0]const u8 = "Vulkan App",
     allocator: Allocator = undefined,
+
+    instance_extensions: std.ArrayList([*:0]const u8) = undefined,
     enable_validation_layers: bool = switch (builtin.mode) {
         .Debug => true,
         else => false,
@@ -67,7 +69,6 @@ const HelloTriangleApplication = struct {
     vki: InstanceDispatch = undefined,
     vkd: DeviceDispatch = undefined,
 
-    instance_extensions: std.ArrayList([*:0]const u8) = undefined,
 
     window: *glfw.Window = undefined,
     instance: vk.Instance = undefined,
@@ -78,7 +79,7 @@ const HelloTriangleApplication = struct {
     present_queue: vk.Queue = undefined,
     surface: vk.SurfaceKHR = undefined,
 
-    swapchain: vk.SwapchainKHR = .null_handle,
+    swapchain: vk.SwapchainKHR = undefined,
     swapchain_images: []vk.Image = undefined,
     swapchain_image_views: []vk.ImageView = undefined,
     swapchain_image_format: vk.Format = undefined,
@@ -87,6 +88,14 @@ const HelloTriangleApplication = struct {
     render_pass: vk.RenderPass = undefined,
     pipeline_layout: vk.PipelineLayout = undefined,
     graphics_pipeline: vk.Pipeline = undefined,
+    swapchain_framebuffers: []vk.Framebuffer = undefined,
+
+    command_pool: vk.CommandPool = undefined,
+    command_buffer: vk.CommandBuffer = undefined,
+    
+    image_available_semaphore: vk.Semaphore = undefined,
+    render_finished_semaphore: vk.Semaphore = undefined,
+    in_flight_fence: vk.Fence = undefined,
 
     //-------------------------------------------
     pub fn init(allocator: Allocator) @This() {
@@ -112,9 +121,22 @@ const HelloTriangleApplication = struct {
         try self.createImageViews();
         try self.createRenderPass();
         try self.createGraphicsPipeline();
+        try self.createFramebuffers();
+        try self.createCommendPool();
+        try self.createCommandBuffer();
+        try self.createSyncObjects();
     }
     
     pub fn deinit(self: *@This()) void {
+        self.vkd.destroyFence(self.device, self.in_flight_fence, null);
+        self.vkd.destroySemaphore(self.device, self.render_finished_semaphore, null);
+        self.vkd.destroySemaphore(self.device, self.image_available_semaphore, null);
+        self.vkd.destroyCommandPool(self.device, self.command_pool, null);
+
+        for (self.swapchain_framebuffers) |framebuffer| {
+            self.vkd.destroyFramebuffer(self.device, framebuffer, null);
+        }
+
         self.vkd.destroyPipeline(self.device, self.graphics_pipeline, null);
         self.vkd.destroyPipelineLayout(self.device, self.pipeline_layout, null);
         self.vkd.destroyRenderPass(self.device, self.render_pass, null);
@@ -142,7 +164,10 @@ const HelloTriangleApplication = struct {
     fn mainLoop(self: *@This()) !void {
         while (!glfw.windowShouldClose(self.window)) {
             glfw.pollEvents();
+            try self.drawFrame();
         }
+
+        try self.vkd.deviceWaitIdle(self.device);
     }
 
     fn initWindow(self: *@This()) !void {
@@ -165,10 +190,10 @@ const HelloTriangleApplication = struct {
 
         const app_info = vk.ApplicationInfo{
             .p_application_name = self.app_name,
-            .application_version = vk.makeApiVersion(1, 0, 0, 0),
+            .application_version = vk.makeApiVersion(0, 1, 3, 0),
             .p_engine_name = "No Engine",
-            .engine_version = vk.makeApiVersion(1, 0, 0, 0),
-            .api_version = vk.API_VERSION_1_2,
+            .engine_version = vk.makeApiVersion(0, 1, 3, 0),
+            .api_version = vk.makeApiVersion(0, 1, 3, 0),
         };
 
         const create_info = vk.InstanceCreateInfo{
@@ -470,6 +495,7 @@ const HelloTriangleApplication = struct {
         try VkAssert.withMessage(result, "Failed to get swapchain images.");
 
         self.swapchain_images = try self.allocator.alloc(vk.Image, image_count);
+        errdefer self.allocator.free(self.swapchain_images);
 
         result = try self.vkd.getSwapchainImagesKHR(self.device, self.swapchain, &image_count, self.swapchain_images.ptr);
         try VkAssert.withMessage(result, "Failed to get swapchain images.");
@@ -550,7 +576,6 @@ const HelloTriangleApplication = struct {
     }
 
     fn createRenderPass(self: *@This()) !void {
-
         const color_attachment = vk.AttachmentDescription{
             .format = self.swapchain_image_format,
             .samples = .{ .@"1_bit" = true },
@@ -573,12 +598,23 @@ const HelloTriangleApplication = struct {
             .p_color_attachments = @ptrCast(&color_attachment_ref),
         };
 
+        const dependency = vk.SubpassDependency{
+            .src_subpass = vk.SUBPASS_EXTERNAL,
+            .dst_subpass = 0,
+            .src_stage_mask = .{ .color_attachment_output_bit = true },
+            .src_access_mask = .{},
+            .dst_stage_mask = .{ .color_attachment_output_bit = true },
+            .dst_access_mask = .{ .color_attachment_write_bit = true },
+        };
+
         const render_pass_info = vk.RenderPassCreateInfo{
             .s_type = .render_pass_create_info,
             .attachment_count = 1,
             .p_attachments = @ptrCast(&color_attachment),
             .subpass_count = 1,
             .p_subpasses = @ptrCast(&subpass),
+            .dependency_count = 1,
+            .p_dependencies = @ptrCast(&dependency),
         };
 
         self.render_pass = try self.vkd.createRenderPass(self.device, &render_pass_info, null);
@@ -743,6 +779,171 @@ const HelloTriangleApplication = struct {
             .p_code = @ptrCast(@alignCast(code.ptr)),
         };
         return try self.vkd.createShaderModule(self.device, &create_info, null);
+    }
+
+    fn createFramebuffers(self: *@This()) !void {
+        self.swapchain_framebuffers = try self.allocator.alloc(vk.Framebuffer, self.swapchain_image_views.len);
+        errdefer self.allocator.free(self.swapchain_framebuffers);
+
+        for (self.swapchain_image_views, 0..) |image_view, i| {
+            const attachments = [_]vk.ImageView{
+                image_view,
+            };
+
+            const framebuffer_info = vk.FramebufferCreateInfo{
+                .s_type = .framebuffer_create_info,
+                .render_pass = self.render_pass,
+                .attachment_count = 1,
+                .p_attachments = &attachments,
+                .width = self.swapchain_extent.width,
+                .height = self.swapchain_extent.height,
+                .layers = 1,
+            };
+
+            self.swapchain_framebuffers[i] = try self.vkd.createFramebuffer(self.device, &framebuffer_info, null);
+        }
+        std.log.debug("Created framebuffers", .{});
+    }
+
+    fn createCommendPool(self: *@This()) !void {
+        const queue_family_indices = try self.findQueueFamilies(self.physical_device);
+
+        const pool_info = vk.CommandPoolCreateInfo{
+            .s_type = .command_pool_create_info,
+            .flags = .{ .reset_command_buffer_bit = true },
+            .queue_family_index = queue_family_indices.graphics_family.?,
+        };
+
+        self.command_pool = try self.vkd.createCommandPool(self.device, &pool_info, null);
+    }
+
+    fn createCommandBuffer(self: *@This()) !void {
+        const alloc_info = vk.CommandBufferAllocateInfo{
+            .s_type = .command_buffer_allocate_info,
+            .command_pool = self.command_pool,
+            .level = .primary,
+            .command_buffer_count = 1,
+        };
+
+        try self.vkd.allocateCommandBuffers(self.device, &alloc_info, @ptrCast(&self.command_buffer));
+    }
+
+    fn recordCommandBuffer(self: *@This(), command_buffer: vk.CommandBuffer, image_index: u32) !void {
+        const begin_info = vk.CommandBufferBeginInfo{
+            .s_type = .command_buffer_begin_info,
+            .flags = .{},
+            .p_inheritance_info = null,
+        };
+
+        try self.vkd.beginCommandBuffer(command_buffer, &begin_info);
+
+        const clear_color = vk.ClearValue{ .color = .{ .float_32 = [4]f32{ 0.0, 0.0, 0.0, 1.0 } } };
+
+        const render_pass_info = vk.RenderPassBeginInfo{
+            .s_type = .render_pass_begin_info,
+            .render_pass = self.render_pass,
+            .framebuffer = self.swapchain_framebuffers[image_index],
+            .render_area = .{
+                .offset = .{ .x = 0, .y = 0},
+                .extent = self.swapchain_extent,
+            },
+            .clear_value_count = 1,
+            .p_clear_values = @ptrCast(&clear_color),
+        };
+
+        self.vkd.cmdBeginRenderPass(command_buffer, &render_pass_info, .@"inline");
+
+            self.vkd.cmdBindPipeline(command_buffer, .graphics, self.graphics_pipeline);
+
+            const viewport = vk.Viewport{
+                .x = 0.0,
+                .y = 0.0,
+                .width = @floatFromInt(self.swapchain_extent.width),
+                .height = @floatFromInt(self.swapchain_extent.height),
+                .min_depth = 0.0,
+                .max_depth = 1.0,
+            };
+            self.vkd.cmdSetViewport(command_buffer, 0, 1, @ptrCast(&viewport));
+
+            const scissor = vk.Rect2D{
+                .offset = .{ .x = 0, .y = 0 },
+                .extent = self.swapchain_extent,
+            };
+            self.vkd.cmdSetScissor(command_buffer, 0, 1, @ptrCast(&scissor));
+
+            self.vkd.cmdDraw(command_buffer, 3, 1, 0, 0);
+
+        self.vkd.cmdEndRenderPass(command_buffer);
+
+        try self.vkd.endCommandBuffer(command_buffer);
+    }
+
+    fn createSyncObjects(self: *@This()) !void {
+        const sempahore_info = vk.SemaphoreCreateInfo{
+            .s_type = .semaphore_create_info,
+        };
+
+        const fence_info = vk.FenceCreateInfo{
+            .s_type = .fence_create_info,
+            .flags = .{ .signaled_bit = true },
+        };
+
+        self.image_available_semaphore = try self.vkd.createSemaphore(self.device, &sempahore_info, null);
+        self.render_finished_semaphore = try self.vkd.createSemaphore(self.device, &sempahore_info, null);
+        self.in_flight_fence = try self.vkd.createFence(self.device, &fence_info, null);
+
+    }
+
+    fn drawFrame(self: *@This()) !void {
+        var result = try self.vkd.waitForFences(self.device, 1, @ptrCast(&self.in_flight_fence), vk.TRUE, std.math.maxInt(u64));
+        try VkAssert.withMessage(result, "Waiting for fence failed");
+
+        try self.vkd.resetFences(self.device, 1, @ptrCast(&self.in_flight_fence));
+
+        var image_index: u32 = undefined;
+        image_index = (try self.vkd.acquireNextImageKHR(
+            self.device,
+            self.swapchain,
+            std.math.maxInt(u64),
+            self.image_available_semaphore,
+            .null_handle,
+        )).image_index;
+
+        try self.vkd.resetCommandBuffer(self.command_buffer, .{});
+        try self.recordCommandBuffer(self.command_buffer, image_index);
+
+        const wait_semaphores = [_]vk.Semaphore{self.image_available_semaphore};
+        const wait_stages = [_]vk.PipelineStageFlags{ .{ .color_attachment_output_bit = true} };
+        const signal_semaphores = [_]vk.Semaphore{self.render_finished_semaphore};
+
+        const submit_info = vk.SubmitInfo{
+            .s_type = .submit_info,
+            .wait_semaphore_count = @intCast(wait_semaphores.len),
+            .p_wait_semaphores = &wait_semaphores,
+            .p_wait_dst_stage_mask = &wait_stages,
+            .command_buffer_count = 1,
+            .p_command_buffers = @ptrCast(&self.command_buffer),
+            .signal_semaphore_count = @intCast(signal_semaphores.len),
+            .p_signal_semaphores = &signal_semaphores,
+        };
+
+        try self.vkd.queueSubmit(self.graphics_queue, 1, @ptrCast(&submit_info), self.in_flight_fence);
+
+        const swapchains = [_]vk.SwapchainKHR{self.swapchain};
+
+        const present_info = vk.PresentInfoKHR{
+            .s_type = .present_info_khr,
+            .wait_semaphore_count = 1,
+            .p_wait_semaphores = @ptrCast(&signal_semaphores),
+            .swapchain_count = 1,
+            .p_swapchains = @ptrCast(&swapchains),
+            .p_image_indices = @ptrCast(&image_index),
+            .p_results = null,
+        };
+
+        result = try self.vkd.queuePresentKHR(self.present_queue, &present_info);
+        try VkAssert.withMessage(result, "Failed to preset queue");
+
     }
 };
 
