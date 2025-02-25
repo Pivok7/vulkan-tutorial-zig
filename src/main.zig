@@ -98,6 +98,8 @@ const HelloTriangleApplication = struct {
     render_finished_semaphores: []vk.Semaphore = undefined,
     in_flight_fences: []vk.Fence = undefined,
 
+    framebuffer_resized: bool = false,
+
     //-------------------------------------------
     pub fn init(allocator: Allocator) @This() {
 
@@ -136,20 +138,12 @@ const HelloTriangleApplication = struct {
         }
         
         self.vkd.destroyCommandPool(self.device, self.command_pool, null);
-
-        for (self.swapchain_framebuffers) |framebuffer| {
-            self.vkd.destroyFramebuffer(self.device, framebuffer, null);
-        }
+        self.cleanupSwapchain();
 
         self.vkd.destroyPipeline(self.device, self.graphics_pipeline, null);
         self.vkd.destroyPipelineLayout(self.device, self.pipeline_layout, null);
         self.vkd.destroyRenderPass(self.device, self.render_pass, null);
-        
-        for (self.swapchain_image_views) |image_view| {
-            self.vkd.destroyImageView(self.device, image_view, null);
-        }
 
-        self.vkd.destroySwapchainKHR(self.device, self.swapchain, null);
         self.vkd.destroyDevice(self.device, null);
         self.vki.destroySurfaceKHR(self.instance, self.surface, null);
         self.vki.destroyInstance(self.instance, null);
@@ -180,10 +174,22 @@ const HelloTriangleApplication = struct {
         std.log.debug("Initialized GLFW", .{});
 
         glfw.windowHint(glfw.WindowHint.client_api, glfw.ClientApi.no_api);
-        glfw.windowHint(glfw.WindowHint.resizable, false);
+        //glfw.windowHint(glfw.WindowHint.resizable, false);
         self.window = try glfw.createWindow(@intCast(self.window_width), @intCast(self.window_height), self.app_name, null);
 
         std.log.info("Created GLFW window", .{});
+
+        self.window.setUserPointer(self);
+        _ = glfw.setFramebufferSizeCallback(self.window, framebufferResizedCallback);
+    }
+
+    fn framebufferResizedCallback(window: *glfw.Window, w_width: c_int, w_height: c_int) callconv(.c) void {
+        _ = w_width;
+        _ = w_height;
+
+        if (window.getUserPointer(@This())) |app| {
+            app.framebuffer_resized = true;
+        }
     }
 
     fn createInstance(self: *@This()) !void {
@@ -451,6 +457,28 @@ const HelloTriangleApplication = struct {
         self.present_queue = self.vkd.getDeviceQueue(self.device, indices.present_family.?, 0);
 
         std.log.debug("Created logical device", .{});
+    }
+
+    fn cleanupSwapchain(self: *@This()) void {
+        for (self.swapchain_framebuffers) |framebuffer| {
+            self.vkd.destroyFramebuffer(self.device, framebuffer, null);
+        }
+
+        for (self.swapchain_image_views) |image_view| {
+            self.vkd.destroyImageView(self.device, image_view, null);
+        }
+
+        self.vkd.destroySwapchainKHR(self.device, self.swapchain, null);
+    }
+
+    fn recreateSwapchain(self: *@This()) !void {
+        try self.vkd.deviceWaitIdle(self.device);
+
+        self.cleanupSwapchain();
+
+        try self.createSwapChain();
+        try self.createImageViews();
+        try self.createFramebuffers();
     }
 
     fn createSwapChain(self: *@This()) !void {
@@ -922,19 +950,37 @@ const HelloTriangleApplication = struct {
         var result = try self.vkd.waitForFences(self.device, 1, @ptrCast(&self.in_flight_fences[self.current_frame]), vk.TRUE, std.math.maxInt(u64));
         try VkAssert.withMessage(result, "Waiting for fence failed");
 
-        try self.vkd.resetFences(self.device, 1, @ptrCast(&self.in_flight_fences[self.current_frame]));
-
-        var image_index: u32 = undefined;
-        image_index = (try self.vkd.acquireNextImageKHR(
+        const next_image = self.vkd.acquireNextImageKHR(
             self.device,
             self.swapchain,
             std.math.maxInt(u64),
             self.image_available_semaphores[self.current_frame],
             .null_handle,
-        )).image_index;
+        ) catch |err| {
+            switch (err) {
+                error.OutOfDateKHR => {
+                    try self.recreateSwapchain();
+                    return;
+                },
+                else => return err,
+            }
+        };
+        //try VkAssert.withMessage(next_image.result, "Failed to acquire next image");
+
+        switch (next_image.result) {
+            .error_out_of_date_khr => {
+                self.framebuffer_resized = false;
+                try self.recreateSwapchain();
+                return;
+            },
+            .success, .suboptimal_khr => {},
+            else => return error.FailedToAcquireSwapchainImage,
+        }
+
+        try self.vkd.resetFences(self.device, 1, @ptrCast(&self.in_flight_fences[self.current_frame]));
 
         try self.vkd.resetCommandBuffer(self.command_buffers[self.current_frame], .{});
-        try self.recordCommandBuffer(self.command_buffers[self.current_frame], image_index);
+        try self.recordCommandBuffer(self.command_buffers[self.current_frame], next_image.image_index);
 
         const wait_semaphores = [_]vk.Semaphore{self.image_available_semaphores[self.current_frame]};
         const wait_stages = [_]vk.PipelineStageFlags{ .{ .color_attachment_output_bit = true} };
@@ -961,13 +1007,30 @@ const HelloTriangleApplication = struct {
             .p_wait_semaphores = @ptrCast(&signal_semaphores),
             .swapchain_count = 1,
             .p_swapchains = @ptrCast(&swapchains),
-            .p_image_indices = @ptrCast(&image_index),
+            .p_image_indices = @ptrCast(&next_image.image_index),
             .p_results = null,
         };
 
-        result = try self.vkd.queuePresentKHR(self.present_queue, &present_info);
-        try VkAssert.withMessage(result, "Failed to preset queue");
+        result = self.vkd.queuePresentKHR(self.present_queue, &present_info) catch |err| {
+            switch (err) {
+                error.OutOfDateKHR => {
+                    try self.recreateSwapchain();
+                    return;
+                },
+                else => return err,
+            }
+        };
+        //try VkAssert.withMessage(result, "Failed to present queue");
 
+        switch (result) {
+            .success => {},
+            .error_out_of_date_khr, .suboptimal_khr => {
+                self.framebuffer_resized = false;
+                try self.recreateSwapchain();
+                return;
+            },
+            else => return error.FailedToPresentSwapchainImage,
+        }
     }
 };
 
