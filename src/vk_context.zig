@@ -3,10 +3,7 @@ const builtin = @import("builtin");
 const glfw = @import("zglfw");
 const vk = @import("vulkan");
 
-pub const debug_mode = switch (builtin.mode) {
-    .Debug, .ReleaseSafe => true,
-    else => false,
-};
+const debug_mode = @import("main.zig").debug_mode;
 
 pub const VkAssert = struct {
     pub fn basic(result: vk.Result) !void {

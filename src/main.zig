@@ -12,9 +12,13 @@ const BaseDispatch = vk_ctx.BaseDispatch;
 const InstanceDispatch = vk_ctx.InstanceDispatch;
 const DeviceDispatch = vk_ctx.DeviceDispatch;
 
+pub const debug_mode = switch (builtin.mode) {
+    .Debug => true,
+    else => false,
+};
+
 const validation_layers = [_][*:0]const u8{
     "VK_LAYER_KHRONOS_validation",
-    //"VK_LAYER_LUNARG_api_dump",
 };
 
 const device_extensions = [_][*:0]const u8{
@@ -54,7 +58,7 @@ const HelloTriangleApplication = struct {
     allocator: Allocator = undefined,
 
     instance_extensions: std.ArrayList([*:0]const u8) = undefined,
-    enable_validation_layers: bool = vk_ctx.debug_mode,
+    enable_validation_layers: bool = debug_mode,
 
     window_width: u32 = 800,
     window_height: u32 = 600, 
@@ -112,7 +116,7 @@ const HelloTriangleApplication = struct {
     fn initVulkan(self: *@This()) !void {
         try self.getRequiredExtensions();
         try self.createInstance();
-        if (vk_ctx.debug_mode) try self.setupDebugMessenger();
+        if (debug_mode) try self.setupDebugMessenger();
         try self.createSurface();
         try self.pickPhysicalDevice();
         try self.createLogicalDevice();
@@ -140,7 +144,7 @@ const HelloTriangleApplication = struct {
         self.vkd.destroyPipelineLayout(self.device, self.pipeline_layout, null);
         self.vkd.destroyRenderPass(self.device, self.render_pass, null);
 
-        if (vk_ctx.debug_mode) self.vki.destroyDebugUtilsMessengerEXT(self.instance, self.debug_messenger, null);
+        if (debug_mode) self.vki.destroyDebugUtilsMessengerEXT(self.instance, self.debug_messenger, null);
 
         self.vkd.destroyDevice(self.device, null);
         self.vki.destroySurfaceKHR(self.instance, self.surface, null);
@@ -187,12 +191,12 @@ const HelloTriangleApplication = struct {
         _ = glfw.setFramebufferSizeCallback(self.window, framebufferResizedCallback);
     }
 
-    fn framebufferResizedCallback(window: *glfw.Window, w_width: c_int, w_height: c_int) callconv(.c) void {
-        _ = w_width;
-        _ = w_height;
+    fn framebufferResizedCallback(window: *glfw.Window, width: c_int, height: c_int) callconv(.c) void {
+        _ = width;
+        _ = height;
 
-        if (window.getUserPointer(@This())) |app| {
-            app.framebuffer_resized = true;
+        if (window.getUserPointer(@This())) |self| {
+            self.framebuffer_resized = true;
         }
     }
 
@@ -202,7 +206,7 @@ const HelloTriangleApplication = struct {
 
         var extensions = std.ArrayList([*:0]const u8).init(self.allocator);
         try extensions.appendSlice(glfw_extensions);
-        if (vk_ctx.debug_mode) try extensions.append(vk.extensions.ext_debug_utils.name);
+        if (debug_mode) try extensions.append(vk.extensions.ext_debug_utils.name);
 
         self.instance_extensions = extensions;
     }
@@ -238,7 +242,7 @@ const HelloTriangleApplication = struct {
     }
 
     fn setupDebugMessenger(self: *@This()) !void {
-        if (vk_ctx.debug_mode) {
+        if (debug_mode) {
             const create_info = vk.DebugUtilsMessengerCreateInfoEXT{
                 .message_severity = .{ .verbose_bit_ext = true, .error_bit_ext = true, .warning_bit_ext = true },
                 .message_type = .{ .general_bit_ext = true, .validation_bit_ext = true, .performance_bit_ext = true },
@@ -488,6 +492,8 @@ const HelloTriangleApplication = struct {
     }
 
     fn recreateSwapchain(self: *@This()) !void {
+        std.log.debug("Recreating swapchain", .{});
+
         try self.vkd.deviceWaitIdle(self.device);
 
         self.cleanupSwapchain();
@@ -979,14 +985,8 @@ const HelloTriangleApplication = struct {
                 else => return err,
             }
         };
-        //try VkAssert.withMessage(next_image.result, "Failed to acquire next image");
 
         switch (next_image.result) {
-            .error_out_of_date_khr => {
-                self.framebuffer_resized = false;
-                try self.recreateSwapchain();
-                return;
-            },
             .success, .suboptimal_khr => {},
             else => return error.FailedToAcquireSwapchainImage,
         }
@@ -1034,11 +1034,10 @@ const HelloTriangleApplication = struct {
                 else => return err,
             }
         };
-        //try VkAssert.withMessage(result, "Failed to present queue");
 
         switch (result) {
             .success => {},
-            .error_out_of_date_khr, .suboptimal_khr => {
+            .suboptimal_khr => {
                 self.framebuffer_resized = false;
                 try self.recreateSwapchain();
                 return;
