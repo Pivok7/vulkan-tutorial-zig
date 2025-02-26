@@ -1,7 +1,12 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const glfw = @import("zglfw");
 const vk = @import("vulkan");
 
+pub const debug_mode = switch (builtin.mode) {
+    .Debug, .ReleaseSafe => true,
+    else => false,
+};
 
 pub const VkAssert = struct {
     pub fn basic(result: vk.Result) !void {
@@ -33,6 +38,8 @@ const apis: []const vk.ApiInfo = &.{
         .instance_commands = .{
             .getDeviceProcAddr = true,
             .destroyInstance = true,
+            .createDebugUtilsMessengerEXT = if (debug_mode) true else false,
+            .destroyDebugUtilsMessengerEXT = if (debug_mode) true else false,
             .destroySurfaceKHR = true,
             .createDevice = true,
             .enumeratePhysicalDevices = true,

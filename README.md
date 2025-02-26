@@ -1,4 +1,6 @@
-# Vulkan project in zig!
+# Vulkan tutorial in zig!
+
+Project based on this tutorial: https://vulkan-tutorial.com/Development_environment
 
 ## Building
 
@@ -7,7 +9,6 @@ You will need:
 * zig compiler (newest version)
 
 * Vulkan SDK and glslc <br>
-Check out this tutorial: https://vulkan-tutorial.com/Development_environment
 
 (optional) Update vk.xml by running 
 ```bash
