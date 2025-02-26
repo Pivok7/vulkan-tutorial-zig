@@ -18,7 +18,7 @@ cd vk_source
 
 Then run `zig build run`
 
-If you are on Windows and get an error related to glslc then try adding glslc.exe to you system path so that it can be invoked from cmd
+If you are on Windows and get an error related to glslc then try adding glslc.exe to your system path so that it can be invoked from cmd
 
 ## Third party libraries used in this project
 
