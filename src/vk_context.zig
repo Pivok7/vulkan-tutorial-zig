@@ -47,6 +47,7 @@ const apis: []const vk.ApiInfo = &.{
             .getPhysicalDeviceSurfaceCapabilitiesKHR = true,
             .getPhysicalDeviceSurfaceFormatsKHR = true,
             .getPhysicalDeviceSurfacePresentModesKHR = true,
+            .getPhysicalDeviceMemoryProperties = true,
         },
         .device_commands = .{
             .getDeviceQueue = true,
@@ -88,6 +89,15 @@ const apis: []const vk.ApiInfo = &.{
             .queueSubmit = true,
             .queuePresentKHR = true,
             .deviceWaitIdle = true,
+            .createBuffer = true,
+            .destroyBuffer = true,
+            .getBufferMemoryRequirements = true,
+            .allocateMemory = true,
+            .bindBufferMemory = true,
+            .freeMemory = true,
+            .mapMemory = true,
+            .unmapMemory = true,
+            .cmdBindVertexBuffers = true,
         },
     },
 };

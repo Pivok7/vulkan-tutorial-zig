@@ -51,6 +51,11 @@ const Vertex = struct{
     }
 };
 
+const vertices = [_]Vertex{
+    Vertex{ .pos = Vec2.new(0.0, -0.5), .color = Vec3.new(1.0, 0.0, 0.0) },
+    Vertex{ .pos = Vec2.new(0.5, 0.5), .color = Vec3.new(0.0, 1.0, 0.0) },
+    Vertex{ .pos = Vec2.new(-0.5, 0.5), .color = Vec3.new(0.0, 0.0, 1.0) },
+};
 
 const validation_layers = [_][*:0]const u8{
     "VK_LAYER_KHRONOS_validation",
@@ -124,6 +129,9 @@ const HelloTriangleApplication = struct {
     graphics_pipeline: vk.Pipeline = undefined,
     swapchain_framebuffers: []vk.Framebuffer = undefined,
 
+    vertex_buffer: vk.Buffer = undefined,
+    vertex_buffer_memory: vk.DeviceMemory = undefined,
+
     command_pool: vk.CommandPool = undefined,
     command_buffers: []vk.CommandBuffer = undefined,
     
@@ -161,6 +169,7 @@ const HelloTriangleApplication = struct {
         try self.createGraphicsPipeline();
         try self.createFramebuffers();
         try self.createCommandPool();
+        try self.createVertexBuffer();
         try self.createCommandBuffers();
         try self.createSyncObjects();
     }
@@ -174,6 +183,9 @@ const HelloTriangleApplication = struct {
         
         self.vkd.destroyCommandPool(self.device, self.command_pool, null);
         self.cleanupSwapchain();
+
+        self.vkd.destroyBuffer(self.device, self.vertex_buffer, null);
+        self.vkd.freeMemory(self.device, self.vertex_buffer_memory, null);
 
         self.vkd.destroyPipeline(self.device, self.graphics_pipeline, null);
         self.vkd.destroyPipelineLayout(self.device, self.pipeline_layout, null);
@@ -909,6 +921,54 @@ const HelloTriangleApplication = struct {
         std.log.debug("Created command pool", .{});
     }
 
+    fn createVertexBuffer(self: *@This()) !void {
+        const buffer_info = vk.BufferCreateInfo{
+            .s_type = .buffer_create_info,
+            .size = @sizeOf(Vertex) * vertices.len,
+            .usage = .{ .vertex_buffer_bit = true },
+            .sharing_mode = .exclusive,
+        };
+
+        self.vertex_buffer = try self.vkd.createBuffer(self.device, &buffer_info, null);
+        std.log.debug("Created vertex buffer", .{});
+
+        const mem_requirements = self.vkd.getBufferMemoryRequirements(self.device, self.vertex_buffer);
+
+        const alloc_info = vk.MemoryAllocateInfo{
+            .s_type = .memory_allocate_info,
+            .allocation_size = mem_requirements.size,
+            .memory_type_index = try self.findMemoryType(
+                mem_requirements.memory_type_bits,
+                vk.MemoryPropertyFlags{ 
+                    .host_visible_bit = true,
+                    .host_coherent_bit = true, 
+                }),
+        };
+
+        self.vertex_buffer_memory = try self.vkd.allocateMemory(self.device, &alloc_info, null);
+        try self.vkd.bindBufferMemory(self.device, self.vertex_buffer, self.vertex_buffer_memory, 0);
+
+        const data = try self.vkd.mapMemory(self.device, self.vertex_buffer_memory, 0, buffer_info.size, .{});
+        std.mem.copyForwards(u8, @as([*]u8, @ptrCast(data.?))[0..buffer_info.size], std.mem.sliceAsBytes(&vertices));
+        defer self.vkd.unmapMemory(self.device, self.vertex_buffer_memory);
+    }
+
+    fn findMemoryType(self: *@This(), type_filter: u32, properties: vk.MemoryPropertyFlags) !u32 {
+        const mem_properties = self.vki.getPhysicalDeviceMemoryProperties(self.physical_device);
+
+        for (0..mem_properties.memory_type_count) |i| {
+            if (
+                // Some evil magic to make compiler happy
+                (type_filter & (@as(u64, 1) << @intCast(i)) != 0)
+                and (vk.MemoryPropertyFlags.intersect(mem_properties.memory_types[i].property_flags, properties) == properties)
+            ) {
+                return @intCast(i);
+            }
+        }
+
+        return error.NoSuitableMemoryType;
+    }
+
     fn createCommandBuffers(self: *@This()) !void {
         const alloc_info = vk.CommandBufferAllocateInfo{
             .s_type = .command_buffer_allocate_info,
@@ -966,6 +1026,10 @@ const HelloTriangleApplication = struct {
                 .extent = self.swapchain_extent,
             };
             self.vkd.cmdSetScissor(command_buffer, 0, 1, @ptrCast(&scissor));
+
+            const vertex_buffers = [_]vk.Buffer{self.vertex_buffer};
+            const offsets = [_]vk.DeviceSize{0};
+            self.vkd.cmdBindVertexBuffers(command_buffer, 0, 1, &vertex_buffers, &offsets);
 
             self.vkd.cmdDraw(command_buffer, 3, 1, 0, 0);
 
