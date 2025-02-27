@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const glfw = @import("zglfw");
 const vk = @import("vulkan");
 const vk_ctx = @import("vk_context.zig");
+const za = @import("zalgebra");
 
 const Allocator = std.mem.Allocator;
 const c_allocator = std.heap.c_allocator;
@@ -16,6 +17,40 @@ pub const debug_mode = switch (builtin.mode) {
     .Debug => true,
     else => false,
 };
+
+const Vec2 = za.Vec2;
+const Vec3 = za.Vec3;
+
+const Vertex = struct{
+    pos: Vec2 = Vec2.zero(),
+    color: Vec3 = Vec3.zero(),
+
+    pub fn getBindingDesciption() vk.VertexInputBindingDescription {
+        return vk.VertexInputBindingDescription{
+            .binding = 0,
+            .stride = @sizeOf(Vertex),
+            .input_rate = .vertex,
+        };
+    }
+
+    pub fn getAttributeDescriptions() []const vk.VertexInputAttributeDescription {
+        return &[_]vk.VertexInputAttributeDescription{
+            .{
+                .binding = 0,
+                .location = 0,
+                .format = .r32g32_sfloat,
+                .offset = @offsetOf(Vertex, "pos"),
+            },
+            .{
+                .binding = 0,
+                .location = 1,
+                .format = .r32g32b32_sfloat,
+                .offset = @offsetOf(Vertex, "color"), 
+            }
+        };
+    }
+};
+
 
 const validation_layers = [_][*:0]const u8{
     "VK_LAYER_KHRONOS_validation",
@@ -706,12 +741,15 @@ const HelloTriangleApplication = struct {
             frag_shader_stage_info,
         };
 
+        const binding_description = Vertex.getBindingDesciption();
+        const attribute_description = Vertex.getAttributeDescriptions();
+
         const vertex_input_info = vk.PipelineVertexInputStateCreateInfo{
             .s_type = .pipeline_vertex_input_state_create_info,
-            .vertex_binding_description_count = 0,
-            .p_vertex_binding_descriptions = null,
-            .vertex_attribute_description_count = 0,
-            .p_vertex_attribute_descriptions = null,
+            .vertex_binding_description_count = 1,
+            .vertex_attribute_description_count = @intCast(attribute_description.len),
+            .p_vertex_binding_descriptions = @ptrCast(&binding_description),
+            .p_vertex_attribute_descriptions = attribute_description.ptr,
         };
 
         const input_assembly = vk.PipelineInputAssemblyStateCreateInfo{

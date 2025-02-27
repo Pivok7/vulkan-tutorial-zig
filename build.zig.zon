@@ -1,6 +1,6 @@
 .{
     .name = "vulkan-tutorial-zig",
-    
+
     .version = "1.0.0",
 
     .paths = .{
@@ -21,6 +21,11 @@
         .vulkan_zig = .{
             .url = "https://github.com/Snektron/vulkan-zig/archive/604416bf44baf95568c428e1aa55499aa8e07607.tar.gz",
             .hash = "1220129ea1652cc0f8578db3dcba254bc9fbc6fdd195b5e1021bf4da8592ea5dc9fb",
+        },
+        //fork
+        .zalgebra = .{
+            .url = "git+https://github.com/Jaco-Minnaar/zalgebra#fcfcd8a16c6be16bf1643c038c9bd23eef50cc23",
+            .hash = "1220dc12582343d53453fd7ac55584941a113fd70942eab2d95c97c0b1c09f5bb532",
         },
     },
 }

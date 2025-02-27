@@ -30,6 +30,10 @@ Licensed under the MIT License.
 Licensed under the MIT License.
 
 
+* zalgebra: https://github.com/Jaco-Minnaar/zalgebra.git <br>
+Licensed under the MIT License.
+
+
 * Parts of the code borrowed from here: <br>
 https://github.com/Cy-Tek/vulkan-tutorial-zig/tree/main
 

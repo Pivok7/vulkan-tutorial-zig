@@ -33,12 +33,23 @@ pub fn build(b: *std.Build) void {
     exe.linkSystemLibrary("glfw3");
 
     const vulkan = b.dependency("vulkan_zig", .{
+        .target = target,
+        .optimize = optimize,
         .registry = b.path("vk_source/vk.xml"),
     }).module("vulkan-zig");
     exe.root_module.addImport("vulkan", vulkan);
 
-    const zglfw = b.dependency("zglfw", .{});
+    const zglfw = b.dependency("zglfw", .{
+        .target = target,
+        .optimize = optimize,
+    });
     exe.root_module.addImport("zglfw", zglfw.module("root"));
+
+    const zalgebra = b.dependency("zalgebra", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    exe.root_module.addImport("zalgebra", zalgebra.module("zalgebra"));
     
     b.installArtifact(exe);
 
