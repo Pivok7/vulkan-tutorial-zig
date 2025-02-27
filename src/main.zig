@@ -54,7 +54,7 @@ const SwapChainSupportDetails = struct {
 };
 
 const HelloTriangleApplication = struct {
-    app_name: [:0]const u8 = "Vulkan App",
+    app_name: [:0]const u8 = "Hello Triangle",
     allocator: Allocator = undefined,
 
     instance_extensions: std.ArrayList([*:0]const u8) = undefined,
@@ -274,7 +274,7 @@ const HelloTriangleApplication = struct {
             std.debug.print("Active validation layers ({d}): \n", .{validation_layers.len});
             for (validation_layers) |val_layer| {
                 for (available_layers) |ava_layer| {
-                    if (cStringEql(&ava_layer.layer_name, val_layer)) {
+                    if (cStringEql(val_layer, &ava_layer.layer_name)) {
                         std.debug.print("\t [X] {s}\n", .{ava_layer.layer_name});
                     } else {
                         std.debug.print("\t [ ] {s}\n", .{ava_layer.layer_name});
@@ -287,7 +287,7 @@ const HelloTriangleApplication = struct {
             var found_layer: bool = false;
 
             for (available_layers) |ava_layer| {
-                if (cStringEql(&ava_layer.layer_name, val_layer)) {
+                if (cStringEql(val_layer, &ava_layer.layer_name)) {
                     found_layer = true;
                     break;
                 }
@@ -341,7 +341,6 @@ const HelloTriangleApplication = struct {
         }
 
         return (indices.isComplete() and extensions_supported and swap_chain_adequate);
-
     }
 
     fn findQueueFamilies(self: *@This(), device: vk.PhysicalDevice) !QueueFamilyIndices {
@@ -385,15 +384,17 @@ const HelloTriangleApplication = struct {
             var found_layer: bool = false;
 
             for (available_extensions) |ava_extension| {
-                if (cStringEql(&ava_extension.extension_name, dev_extension)) {
+                if (cStringEql(dev_extension, &ava_extension.extension_name,)) {
                     found_layer = true;
                 }
             }
+
             if (!found_layer) {
                 std.log.err("Device extension \"{s}\" not found", .{dev_extension});
                 return false;
             }
         }
+
         return true;
     }
 
@@ -822,7 +823,6 @@ const HelloTriangleApplication = struct {
 
         try VkAssert.withMessage(result, "Failed to create graphics pipeline");
         std.log.debug("Created graphics pipeline", .{});
-
     }
 
     fn createShaderModule(self: @This(), code: []const u8) !vk.ShaderModule {
@@ -960,8 +960,8 @@ const HelloTriangleApplication = struct {
             self.render_finished_semaphores[i] = try self.vkd.createSemaphore(self.device, &sempahore_info, null);
             self.in_flight_fences[i] = try self.vkd.createFence(self.device, &fence_info, null);
         }
-        std.log.debug("Created sync objects", .{});
 
+        std.log.debug("Created sync objects", .{});
     }
 
     fn drawFrame(self: *@This()) !void {
@@ -1051,7 +1051,6 @@ const HelloTriangleApplication = struct {
             return;
         }    
     }
-    
 };
 
 fn createDebugMessengerCreateInfo() vk.DebugUtilsMessengerCreateInfoEXT {
@@ -1079,7 +1078,7 @@ fn debugCallback(
     return vk.TRUE;
 }
 
-fn cStringEql(str_1: []const u8, str_2: [*:0]const u8) bool {
+fn cStringEql(str_1: [*:0]const u8, str_2: [*]const u8) bool {
     var i: usize = 0;
     while (str_1[i] == str_2[i]) : (i += 1) {
         if (str_1[i] == '\x00') return true;
