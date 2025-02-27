@@ -1,12 +1,12 @@
 # Vulkan tutorial in zig!
 
-Project based on this tutorial: https://vulkan-tutorial.com/Development_environment
+Project based on this tutorial: https://vulkan-tutorial.com/
 
 ## Building
 
 You will need:
 
-* zig compiler (newest version)
+* Zig compiler (newest version)
 
 * Vulkan SDK and glslc <br>
 
