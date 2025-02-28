@@ -419,7 +419,10 @@ const HelloTriangleApplication = struct {
 
         if (present_mode_count > 0) {
             try details.present_modes.resize(present_mode_count);
-            result = try self.vki.getPhysicalDeviceSurfacePresentModesKHR(device, self.surface, &present_mode_count, @ptrCast(details.present_modes.items.ptr));
+            result = try self.vki.getPhysicalDeviceSurfacePresentModesKHR(
+                device, self.surface, &present_mode_count,
+                @ptrCast(details.present_modes.items.ptr)
+            );
             try VkAssert.withMessage(result, "Failed to get physical device surface present modes.");
         }
 
@@ -967,7 +970,13 @@ const HelloTriangleApplication = struct {
     fn drawFrame(self: *@This()) !void {
         defer self.current_frame = (self.current_frame + 1) % self.max_frames_in_flight;
 
-        var result = try self.vkd.waitForFences(self.device, 1, @ptrCast(&self.in_flight_fences[self.current_frame]), vk.TRUE, std.math.maxInt(u64));
+        var result = try self.vkd.waitForFences(
+            self.device,
+            1,
+            @ptrCast(&self.in_flight_fences[self.current_frame]),
+            vk.TRUE,
+            std.math.maxInt(u64)
+        );
         try VkAssert.withMessage(result, "Waiting for fence failed");
 
         const next_image = self.vkd.acquireNextImageKHR(
