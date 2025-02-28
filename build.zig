@@ -17,20 +17,27 @@ pub fn build(b: *std.Build) void {
     });
     
     // Libraries
-    if (builtin.target.os.tag == .windows) {
-        exe.addIncludePath(b.path("lib_windows/include"));
-        exe.addLibraryPath(b.path("lib_windows/lib"));
-        if (optimize == .ReleaseSmall or optimize == .ReleaseFast) {
-            exe.subsystem = .Windows;
-        }
-
-        // We move dynamic libraries to where the executable is located
-        b.installFile("lib_windows/lib/glfw3.dll", "bin/glfw3.dll");
-        
-    }
-
+    
     exe.linkLibC();
-    exe.linkSystemLibrary("glfw3");
+
+    const os_tag = target.query.os_tag orelse builtin.target.os.tag;
+    switch (os_tag) {
+        .windows => {
+            // Disable console window in Release mode
+            if (optimize != .Debug) exe.subsystem = .Windows;
+
+            // This library is needed for static linking with glfw
+            exe.linkSystemLibrary("gdi32");
+            exe.addObjectFile(b.path("lib_windows/libglfw3.a"));
+        },
+        .linux => {
+            exe.linkSystemLibrary("glfw3");
+        },
+        else => {
+            std.log.warn("{} may be unsuported", .{os_tag});
+            exe.linkSystemLibrary("glfw3");
+        },
+    }
 
     const vulkan = b.dependency("vulkan_zig", .{
         .target = target,
@@ -50,6 +57,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     exe.root_module.addImport("zalgebra", zalgebra.module("zalgebra"));
+
     
     b.installArtifact(exe);
 
