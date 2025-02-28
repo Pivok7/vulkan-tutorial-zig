@@ -20,6 +20,8 @@ Then run `zig build run`
 
 If you are on Windows and get an error related to glslc then try adding glslc.exe to your system path so that it can be invoked from cmd
 
+Validation layers are enabled in Debug mode
+
 ## Third party libraries used in this project
 
 * vulkan-zig: https://github.com/Snektron/vulkan-zig.git <br>

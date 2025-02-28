@@ -88,7 +88,7 @@ const SwapChainSupportDetails = struct {
 };
 
 const HelloTriangleApplication = struct {
-    app_name: [:0]const u8 = "Hello Triangle",
+    app_name: [:0]const u8 = "Vulkan Tutorial",
     allocator: Allocator = undefined,
 
     instance_extensions: std.ArrayList([*:0]const u8) = undefined,
