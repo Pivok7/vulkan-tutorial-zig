@@ -123,9 +123,6 @@ const HelloTriangleApplication = struct {
     graphics_pipeline: vk.Pipeline = undefined,
     swapchain_framebuffers: []vk.Framebuffer = undefined,
 
-    vertex_buffer: vk.Buffer = undefined,
-    vertex_buffer_memory: vk.DeviceMemory = undefined,
-
     command_pool: vk.CommandPool = undefined,
     command_buffers: []vk.CommandBuffer = undefined,
     
@@ -136,10 +133,20 @@ const HelloTriangleApplication = struct {
 
     framebuffer_resized: bool = false,
 
+    vertex_buffer: vk.Buffer = undefined,
+    vertex_buffer_memory: vk.DeviceMemory = undefined,
+    index_buffer: vk.Buffer = undefined,
+    index_buffer_memory: vk.DeviceMemory = undefined,
+
     vertices: []const Vertex = &[_]Vertex{
-        Vertex{ .pos = Vec2.new(0.0, -0.5), .color = Vec3.new(1.0, 0.0, 0.0) },
-        Vertex{ .pos = Vec2.new(0.5, 0.5), .color = Vec3.new(0.0, 1.0, 0.0) },
-        Vertex{ .pos = Vec2.new(-0.5, 0.5), .color = Vec3.new(0.0, 0.0, 1.0) },
+        Vertex{ .pos = Vec2.new(-0.5, -0.5), .color = Vec3.new(1.0, 0.0, 0.0) },
+        Vertex{ .pos = Vec2.new(0.5, -0.5), .color = Vec3.new(0.0, 1.0, 0.0) },
+        Vertex{ .pos = Vec2.new(0.5, 0.5), .color = Vec3.new(0.0, 0.0, 1.0) },
+        Vertex{ .pos = Vec2.new(-0.5, 0.5), .color = Vec3.new(1.0, 1.0, 1.0) },
+    },
+
+    indices: []const u16 = &[_]u16{
+        0, 1, 2, 2, 3, 0
     },
 
     //-------------------------------------------
@@ -170,6 +177,7 @@ const HelloTriangleApplication = struct {
         try self.createFramebuffers();
         try self.createCommandPool();
         try self.createVertexBuffer();
+        try self.createIndexBuffer();
         try self.createCommandBuffers();
         try self.createSyncObjects();
     }
@@ -186,6 +194,9 @@ const HelloTriangleApplication = struct {
 
         self.vkd.destroyBuffer(self.device, self.vertex_buffer, null);
         self.vkd.freeMemory(self.device, self.vertex_buffer_memory, null);
+
+        self.vkd.destroyBuffer(self.device, self.index_buffer, null);
+        self.vkd.freeMemory(self.device, self.index_buffer_memory, null);
 
         self.vkd.destroyPipeline(self.device, self.graphics_pipeline, null);
         self.vkd.destroyPipelineLayout(self.device, self.pipeline_layout, null);
@@ -958,6 +969,38 @@ const HelloTriangleApplication = struct {
         self.vkd.freeMemory(self.device, staging_buffer_memory, null);
     }
 
+    fn createIndexBuffer(self: *@This()) !void {
+        const buffer_size: vk.DeviceSize = @sizeOf(u16) * self.indices.len;
+
+        var staging_buffer: vk.Buffer = undefined;
+        var staging_buffer_memory: vk.DeviceMemory = undefined;
+
+        try self.createBuffer(
+            buffer_size,
+            .{ .transfer_src_bit = true },
+            .{ .host_visible_bit = true, .host_coherent_bit = true, },
+            &staging_buffer,
+            &staging_buffer_memory,
+        );
+
+        const data = try self.vkd.mapMemory(self.device, staging_buffer_memory, 0, buffer_size, .{});
+        std.mem.copyForwards(u8, @as([*]u8, @ptrCast(data.?))[0..buffer_size], std.mem.sliceAsBytes(self.indices));
+        self.vkd.unmapMemory(self.device, staging_buffer_memory);
+
+        try self.createBuffer(
+            buffer_size,
+            .{ .transfer_dst_bit = true, .index_buffer_bit = true },
+            .{ .device_local_bit = true },
+            &self.index_buffer,
+            &self.index_buffer_memory,
+        );
+
+        try self.copyBuffer(staging_buffer, self.index_buffer, buffer_size);
+
+        self.vkd.destroyBuffer(self.device, staging_buffer, null);
+        self.vkd.freeMemory(self.device, staging_buffer_memory, null);
+    }
+
     fn createBuffer(
         self: *@This(),
         size: vk.DeviceSize,
@@ -1103,7 +1146,9 @@ const HelloTriangleApplication = struct {
             const offsets = [_]vk.DeviceSize{0};
             self.vkd.cmdBindVertexBuffers(command_buffer, 0, 1, &vertex_buffers, &offsets);
 
-            self.vkd.cmdDraw(command_buffer, 3, 1, 0, 0);
+            self.vkd.cmdBindIndexBuffer(command_buffer, self.index_buffer, 0, .uint16);
+
+            self.vkd.cmdDrawIndexed(command_buffer, @intCast(self.indices.len), 1, 0, 0, 0);
 
         self.vkd.cmdEndRenderPass(command_buffer);
 

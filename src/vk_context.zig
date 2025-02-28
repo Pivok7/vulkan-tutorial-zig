@@ -101,6 +101,8 @@ const apis: []const vk.ApiInfo = &.{
             .queueWaitIdle = true,
             .freeCommandBuffers = true,
             .cmdCopyBuffer = true,
+            .cmdBindIndexBuffer = true,
+            .cmdDrawIndexed = true,
         },
     },
 };
