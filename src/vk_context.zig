@@ -98,6 +98,9 @@ const apis: []const vk.ApiInfo = &.{
             .mapMemory = true,
             .unmapMemory = true,
             .cmdBindVertexBuffers = true,
+            .queueWaitIdle = true,
+            .freeCommandBuffers = true,
+            .cmdCopyBuffer = true,
         },
     },
 };

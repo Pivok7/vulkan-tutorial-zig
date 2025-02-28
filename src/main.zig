@@ -51,12 +51,6 @@ const Vertex = struct{
     }
 };
 
-const vertices = [_]Vertex{
-    Vertex{ .pos = Vec2.new(0.0, -0.5), .color = Vec3.new(1.0, 0.0, 0.0) },
-    Vertex{ .pos = Vec2.new(0.5, 0.5), .color = Vec3.new(0.0, 1.0, 0.0) },
-    Vertex{ .pos = Vec2.new(-0.5, 0.5), .color = Vec3.new(0.0, 0.0, 1.0) },
-};
-
 const validation_layers = [_][*:0]const u8{
     "VK_LAYER_KHRONOS_validation",
 };
@@ -141,6 +135,12 @@ const HelloTriangleApplication = struct {
     in_flight_fences: []vk.Fence = undefined,
 
     framebuffer_resized: bool = false,
+
+    vertices: []const Vertex = &[_]Vertex{
+        Vertex{ .pos = Vec2.new(0.0, -0.5), .color = Vec3.new(1.0, 0.0, 0.0) },
+        Vertex{ .pos = Vec2.new(0.5, 0.5), .color = Vec3.new(0.0, 1.0, 0.0) },
+        Vertex{ .pos = Vec2.new(-0.5, 0.5), .color = Vec3.new(0.0, 0.0, 1.0) },
+    },
 
     //-------------------------------------------
     pub fn init(allocator: Allocator) @This() {
@@ -466,7 +466,12 @@ const HelloTriangleApplication = struct {
 
         if (present_mode_count > 0) {
             try details.present_modes.resize(present_mode_count);
-            result = try self.vki.getPhysicalDeviceSurfacePresentModesKHR(device, self.surface, &present_mode_count, @ptrCast(details.present_modes.items.ptr));
+            result = try self.vki.getPhysicalDeviceSurfacePresentModesKHR(
+                device,
+                self.surface,
+                &present_mode_count,
+                @ptrCast(details.present_modes.items.ptr)
+            );
             try VkAssert.withMessage(result, "Failed to get physical device surface present modes.");
         }
 
@@ -922,35 +927,103 @@ const HelloTriangleApplication = struct {
     }
 
     fn createVertexBuffer(self: *@This()) !void {
+        const buffer_size: vk.DeviceSize = @sizeOf(Vertex) * self.vertices.len;
+
+        var staging_buffer: vk.Buffer = undefined;
+        var staging_buffer_memory: vk.DeviceMemory = undefined;
+
+        try self.createBuffer(
+            buffer_size,
+            .{ .transfer_src_bit = true },
+            .{ .host_visible_bit = true, .host_coherent_bit = true, },
+            &staging_buffer,
+            &staging_buffer_memory,
+        );
+
+        const data = try self.vkd.mapMemory(self.device, staging_buffer_memory, 0, buffer_size, .{});
+        std.mem.copyForwards(u8, @as([*]u8, @ptrCast(data.?))[0..buffer_size], std.mem.sliceAsBytes(self.vertices));
+        self.vkd.unmapMemory(self.device, staging_buffer_memory);
+
+        try self.createBuffer(
+            buffer_size,
+            .{ .transfer_dst_bit = true, .vertex_buffer_bit = true },
+            .{ .device_local_bit = true },
+            &self.vertex_buffer,
+            &self.vertex_buffer_memory,
+        );
+
+        try self.copyBuffer(staging_buffer, self.vertex_buffer, buffer_size);
+
+        self.vkd.destroyBuffer(self.device, staging_buffer, null);
+        self.vkd.freeMemory(self.device, staging_buffer_memory, null);
+    }
+
+    fn createBuffer(
+        self: *@This(),
+        size: vk.DeviceSize,
+        usage: vk.BufferUsageFlags,
+        properties: vk.MemoryPropertyFlags,
+        buffer: *vk.Buffer,
+        buffer_memory: *vk.DeviceMemory
+    ) !void {
         const buffer_info = vk.BufferCreateInfo{
             .s_type = .buffer_create_info,
-            .size = @sizeOf(Vertex) * vertices.len,
-            .usage = .{ .vertex_buffer_bit = true },
+            .size = size,
+            .usage = usage,
             .sharing_mode = .exclusive,
         };
 
-        self.vertex_buffer = try self.vkd.createBuffer(self.device, &buffer_info, null);
-        std.log.debug("Created vertex buffer", .{});
+        buffer.* = try self.vkd.createBuffer(self.device, &buffer_info, null);
 
-        const mem_requirements = self.vkd.getBufferMemoryRequirements(self.device, self.vertex_buffer);
+        const mem_requirements = self.vkd.getBufferMemoryRequirements(self.device, buffer.*);
 
         const alloc_info = vk.MemoryAllocateInfo{
             .s_type = .memory_allocate_info,
             .allocation_size = mem_requirements.size,
             .memory_type_index = try self.findMemoryType(
-                mem_requirements.memory_type_bits,
-                vk.MemoryPropertyFlags{ 
-                    .host_visible_bit = true,
-                    .host_coherent_bit = true, 
-                }),
+                mem_requirements.memory_type_bits, properties),
         };
 
-        self.vertex_buffer_memory = try self.vkd.allocateMemory(self.device, &alloc_info, null);
-        try self.vkd.bindBufferMemory(self.device, self.vertex_buffer, self.vertex_buffer_memory, 0);
+        buffer_memory.* = try self.vkd.allocateMemory(self.device, &alloc_info, null);
+        try self.vkd.bindBufferMemory(self.device, buffer.*, buffer_memory.*, 0);
+    }
+    
+    fn copyBuffer(self: *@This(), src_buffer: vk.Buffer, dst_buffer: vk.Buffer, size: vk.DeviceSize) !void {
+        const alloc_info = vk.CommandBufferAllocateInfo{
+            .s_type = .command_buffer_allocate_info,
+            .level = .primary,
+            .command_pool = self.command_pool,
+            .command_buffer_count = 1,
+        };
 
-        const data = try self.vkd.mapMemory(self.device, self.vertex_buffer_memory, 0, buffer_info.size, .{});
-        std.mem.copyForwards(u8, @as([*]u8, @ptrCast(data.?))[0..buffer_info.size], std.mem.sliceAsBytes(&vertices));
-        defer self.vkd.unmapMemory(self.device, self.vertex_buffer_memory);
+        var command_buffer: vk.CommandBuffer = undefined;
+        try self.vkd.allocateCommandBuffers(self.device, &alloc_info, @ptrCast(&command_buffer));
+
+        const begin_info = vk.CommandBufferBeginInfo{
+            .s_type = .command_buffer_begin_info,
+            .flags = .{ .one_time_submit_bit = true },
+        };
+        try self.vkd.beginCommandBuffer(command_buffer, &begin_info);
+
+            const copy_region = vk.BufferCopy{
+                .src_offset = 0,
+                .dst_offset = 0,
+                .size = size,
+            };
+            self.vkd.cmdCopyBuffer(command_buffer, src_buffer, dst_buffer, 1, @ptrCast(&copy_region));
+
+        try self.vkd.endCommandBuffer(command_buffer);
+
+        const submit_info = vk.SubmitInfo{
+            .s_type = .submit_info,
+            .command_buffer_count = 1,
+            .p_command_buffers = @ptrCast(&command_buffer),
+        };
+        
+        try self.vkd.queueSubmit(self.graphics_queue, 1, @ptrCast(&submit_info), .null_handle);
+        try self.vkd.queueWaitIdle(self.graphics_queue);
+
+        self.vkd.freeCommandBuffers(self.device, self.command_pool, 1, @ptrCast(&command_buffer));
     }
 
     fn findMemoryType(self: *@This(), type_filter: u32, properties: vk.MemoryPropertyFlags) !u32 {
@@ -965,7 +1038,6 @@ const HelloTriangleApplication = struct {
                 return @intCast(i);
             }
         }
-
         return error.NoSuitableMemoryType;
     }
 
@@ -1069,7 +1141,12 @@ const HelloTriangleApplication = struct {
     fn drawFrame(self: *@This()) !void {
         defer self.current_frame = (self.current_frame + 1) % self.max_frames_in_flight;
 
-        var result = try self.vkd.waitForFences(self.device, 1, @ptrCast(&self.in_flight_fences[self.current_frame]), vk.TRUE, std.math.maxInt(u64));
+        var result = try self.vkd.waitForFences(
+            self.device, 1,
+            @ptrCast(&self.in_flight_fences[self.current_frame]),
+            vk.TRUE,
+            std.math.maxInt(u64)
+        );
         try VkAssert.withMessage(result, "Waiting for fence failed");
 
         const next_image = self.vkd.acquireNextImageKHR(
