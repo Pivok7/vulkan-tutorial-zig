@@ -25,7 +25,6 @@ const device_extensions = [_][*:0]const u8{
     vk.extensions.khr_swapchain.name,
 };
 
-
 const QueueFamilyIndices = struct {
     graphics_family: ?u32 = null,
     present_family: ?u32 = null,
@@ -629,6 +628,7 @@ const HelloTriangleApplication = struct {
 
             self.swapchain_image_views[i] = try self.vkd.createImageView(self.device, &create_info, null);
         }
+
         std.log.debug("Created image views", .{});
     }
 
@@ -858,6 +858,7 @@ const HelloTriangleApplication = struct {
 
             self.swapchain_framebuffers[i] = try self.vkd.createFramebuffer(self.device, &framebuffer_info, null);
         }
+
         std.log.debug("Created framebuffers", .{});
     }
 

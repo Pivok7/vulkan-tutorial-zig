@@ -1,7 +1,10 @@
 .{
-    .name = "vulkan-tutorial-zig",
+    .name = .vulkan_tutorial_zig,
     
     .version = "1.0.0",
+
+    .fingerprint = 0x130789c4309112b0, // Changing this has security and trust implications.
+
 
     .paths = .{
         "build.zig",
