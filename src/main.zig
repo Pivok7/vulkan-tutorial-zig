@@ -13,6 +13,8 @@ const BaseDispatch = vk_ctx.BaseDispatch;
 const InstanceDispatch = vk_ctx.InstanceDispatch;
 const DeviceDispatch = vk_ctx.DeviceDispatch;
 
+var start_time: i128 = undefined;
+
 pub const debug_mode = switch (builtin.mode) {
     .Debug => true,
     else => false,
@@ -20,6 +22,7 @@ pub const debug_mode = switch (builtin.mode) {
 
 const Vec2 = za.Vec2;
 const Vec3 = za.Vec3;
+const Mat4 = za.Mat4;
 
 const Vertex = struct{
     pos: Vec2 = Vec2.zero(),
@@ -51,6 +54,12 @@ const Vertex = struct{
     }
 };
 
+const UniformBufferObject = struct{
+    model: Mat4,
+    view: Mat4,
+    proj: Mat4,
+};
+
 const validation_layers = [_][*:0]const u8{
     "VK_LAYER_KHRONOS_validation",
 };
@@ -58,7 +67,6 @@ const validation_layers = [_][*:0]const u8{
 const device_extensions = [_][*:0]const u8{
     vk.extensions.khr_swapchain.name,
 };
-
 
 const QueueFamilyIndices = struct {
     graphics_family: ?u32 = null,
@@ -119,6 +127,7 @@ const HelloTriangleApplication = struct {
     swapchain_extent: vk.Extent2D = undefined,
 
     render_pass: vk.RenderPass = undefined,
+    descriptor_set_layout: vk.DescriptorSetLayout = undefined,
     pipeline_layout: vk.PipelineLayout = undefined,
     graphics_pipeline: vk.Pipeline = undefined,
     swapchain_framebuffers: []vk.Framebuffer = undefined,
@@ -137,6 +146,13 @@ const HelloTriangleApplication = struct {
     vertex_buffer_memory: vk.DeviceMemory = undefined,
     index_buffer: vk.Buffer = undefined,
     index_buffer_memory: vk.DeviceMemory = undefined,
+    
+    uniform_buffers: []vk.Buffer = undefined,
+    uniform_buffers_memory: []vk.DeviceMemory = undefined,
+    uniform_buffers_mapped: []?*anyopaque = undefined,
+
+    descriptor_pool: vk.DescriptorPool = undefined,
+    descriptor_sets: []vk.DescriptorSet = undefined,
 
     vertices: []const Vertex = &[_]Vertex{
         Vertex{ .pos = Vec2.new(-0.5, -0.5), .color = Vec3.new(1.0, 0.0, 0.0) },
@@ -173,34 +189,43 @@ const HelloTriangleApplication = struct {
         try self.createSwapChain();
         try self.createImageViews();
         try self.createRenderPass();
+        try self.createDescriptorSetLayout();
         try self.createGraphicsPipeline();
         try self.createFramebuffers();
         try self.createCommandPool();
         try self.createVertexBuffer();
         try self.createIndexBuffer();
+        try self.createUniformBuffers();
+        try self.createDescriptorPool();
+        try self.createDescriptorSets();
         try self.createCommandBuffers();
         try self.createSyncObjects();
     }
     
     pub fn deinit(self: *@This()) void {
+        self.cleanupSwapchain();
+
+        self.vkd.destroyPipeline(self.device, self.graphics_pipeline, null);
+        self.vkd.destroyPipelineLayout(self.device, self.pipeline_layout, null);
+        self.vkd.destroyRenderPass(self.device, self.render_pass, null);
+
         for (0..self.max_frames_in_flight) |i| {
             self.vkd.destroyFence(self.device, self.in_flight_fences[i], null);
             self.vkd.destroySemaphore(self.device, self.render_finished_semaphores[i], null);
             self.vkd.destroySemaphore(self.device, self.image_available_semaphores[i], null);
+            self.vkd.destroyBuffer(self.device, self.uniform_buffers[i], null);
+            self.vkd.freeMemory(self.device, self.uniform_buffers_memory[i], null);
         }
         
         self.vkd.destroyCommandPool(self.device, self.command_pool, null);
-        self.cleanupSwapchain();
+        self.vkd.destroyDescriptorPool(self.device, self.descriptor_pool, null);
 
+        self.vkd.destroyDescriptorSetLayout(self.device, self.descriptor_set_layout, null);
         self.vkd.destroyBuffer(self.device, self.vertex_buffer, null);
         self.vkd.freeMemory(self.device, self.vertex_buffer_memory, null);
 
         self.vkd.destroyBuffer(self.device, self.index_buffer, null);
         self.vkd.freeMemory(self.device, self.index_buffer_memory, null);
-
-        self.vkd.destroyPipeline(self.device, self.graphics_pipeline, null);
-        self.vkd.destroyPipelineLayout(self.device, self.pipeline_layout, null);
-        self.vkd.destroyRenderPass(self.device, self.render_pass, null);
 
         if (debug_mode) self.vki.destroyDebugUtilsMessengerEXT(self.instance, self.debug_messenger, null);
 
@@ -214,6 +239,7 @@ const HelloTriangleApplication = struct {
         glfw.terminate();
         std.log.debug("Terminated GLFW", .{});
 
+        self.allocator.free(self.descriptor_sets);
         self.allocator.free(self.command_buffers);
         self.allocator.free(self.swapchain_image_views);
         self.allocator.free(self.swapchain_images);
@@ -738,6 +764,29 @@ const HelloTriangleApplication = struct {
         std.log.debug("Created render pass", .{});
     }
 
+    fn createDescriptorSetLayout(self: *@This()) !void {
+        const ubo_layout_binding = vk.DescriptorSetLayoutBinding{
+            .binding = 0,
+            .descriptor_type = .uniform_buffer,
+            .descriptor_count = 1,
+            .stage_flags = .{ .vertex_bit = true },
+            .p_immutable_samplers = null,
+        };
+        
+        const layout_info = vk.DescriptorSetLayoutCreateInfo{
+            .s_type = .descriptor_set_layout_create_info,
+            .binding_count = 1,
+            .p_bindings = @ptrCast(&ubo_layout_binding),
+        };
+
+        self.descriptor_set_layout = try self.vkd.createDescriptorSetLayout(
+            self.device,
+            &layout_info,
+            null
+        );
+        
+    }
+
     fn createGraphicsPipeline(self: *@This()) !void {
         const vert_file align(@alignOf(u32)) = @embedFile("shaders/vert.spv").*;
         const frag_file align(@alignOf(u32)) = @embedFile("shaders/frag.spv").*;
@@ -804,7 +853,7 @@ const HelloTriangleApplication = struct {
             .polygon_mode = .fill,
             .line_width = 1.0,
             .cull_mode = .{ .back_bit = true },
-            .front_face = .clockwise,
+            .front_face = .counter_clockwise,
             .depth_bias_enable = vk.FALSE,
             .depth_bias_constant_factor = 0.0,
             .depth_bias_clamp = 0.0,
@@ -850,8 +899,8 @@ const HelloTriangleApplication = struct {
 
         const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
             .s_type = .pipeline_layout_create_info,
-            .set_layout_count = 0,
-            .p_set_layouts = null,
+            .set_layout_count = 1,
+            .p_set_layouts = @ptrCast(&self.descriptor_set_layout),
             .push_constant_range_count = 0,
             .p_push_constant_ranges = null,
         };
@@ -967,6 +1016,8 @@ const HelloTriangleApplication = struct {
 
         self.vkd.destroyBuffer(self.device, staging_buffer, null);
         self.vkd.freeMemory(self.device, staging_buffer_memory, null);
+        
+        std.log.debug("Created vertex buffer", .{});
     }
 
     fn createIndexBuffer(self: *@This()) !void {
@@ -999,6 +1050,8 @@ const HelloTriangleApplication = struct {
 
         self.vkd.destroyBuffer(self.device, staging_buffer, null);
         self.vkd.freeMemory(self.device, staging_buffer_memory, null);
+
+        std.log.debug("Created index buffer", .{});
     }
 
     fn createBuffer(
@@ -1084,6 +1137,96 @@ const HelloTriangleApplication = struct {
         return error.NoSuitableMemoryType;
     }
 
+    fn createUniformBuffers(self: *@This()) !void {
+        const buffer_size: vk.DeviceSize = @sizeOf(UniformBufferObject);
+
+        self.uniform_buffers = try self.allocator.alloc(vk.Buffer, self.max_frames_in_flight);
+        self.uniform_buffers_memory = try self.allocator.alloc(vk.DeviceMemory, self.max_frames_in_flight);
+        self.uniform_buffers_mapped = try self.allocator.alloc(?*anyopaque, self.max_frames_in_flight);
+        
+        for (0..self.max_frames_in_flight) |i| {
+            try self.createBuffer(
+                buffer_size,
+                .{ .uniform_buffer_bit = true },
+                .{ .host_visible_bit = true, .host_coherent_bit = true, },
+                &self.uniform_buffers[i],
+                &self.uniform_buffers_memory[i],
+            );
+
+            self.uniform_buffers_mapped[i] = try self.vkd.mapMemory(
+                self.device,
+                self.uniform_buffers_memory[i],
+                0,
+                buffer_size,
+                .{}
+            );
+        }
+        
+        std.log.debug("Created uniform buffers", .{});
+    }
+
+    fn createDescriptorPool(self: *@This()) !void {
+        const pool_size = vk.DescriptorPoolSize{
+            .type = .uniform_buffer,
+            .descriptor_count = @intCast(self.max_frames_in_flight),
+        };
+
+        const pool_info = vk.DescriptorPoolCreateInfo{
+            .s_type = .descriptor_pool_create_info,
+            .pool_size_count = 1,
+            .p_pool_sizes = @ptrCast(&pool_size),
+            .max_sets = @intCast(self.max_frames_in_flight),
+        };
+
+        self.descriptor_pool = try self.vkd.createDescriptorPool(self.device, &pool_info, null);
+        
+        std.log.debug("Created descriptor pool", .{});
+    }
+
+    fn createDescriptorSets(self: *@This()) !void {
+        const layouts = try self.allocator.alloc(vk.DescriptorSetLayout, self.max_frames_in_flight);
+        defer self.allocator.free(layouts);
+
+        for (layouts) |*layout| {
+            layout.* = self.descriptor_set_layout;
+        }
+        
+        const alloc_info = vk.DescriptorSetAllocateInfo{
+            .s_type = .descriptor_set_allocate_info,
+            .descriptor_pool = self.descriptor_pool,
+            .descriptor_set_count = @intCast(self.max_frames_in_flight),
+            .p_set_layouts = layouts.ptr,
+        };
+
+        self.descriptor_sets = try self.allocator.alloc(vk.DescriptorSet, self.max_frames_in_flight);
+        
+        try self.vkd.allocateDescriptorSets(self.device, &alloc_info, self.descriptor_sets.ptr);
+
+        for (0..self.max_frames_in_flight) |i| {
+            const buffer_info = vk.DescriptorBufferInfo{
+                .buffer = self.uniform_buffers[i],
+                .offset = 0,
+                .range = @sizeOf(UniformBufferObject),
+            };
+            
+            const descriptor_write = vk.WriteDescriptorSet{
+                .s_type = .write_descriptor_set,
+                .dst_set = self.descriptor_sets[i],
+                .dst_binding = 0,
+                .dst_array_element = 0,
+                .descriptor_type = .uniform_buffer,
+                .descriptor_count = 1,
+                .p_buffer_info = @ptrCast(&buffer_info),
+                .p_image_info = undefined,
+                .p_texel_buffer_view = undefined,
+            };
+            
+            self.vkd.updateDescriptorSets(self.device, 1, @ptrCast(&descriptor_write), 0, null);
+        }
+
+        std.log.debug("Created descriptor sets", .{});
+    }
+
     fn createCommandBuffers(self: *@This()) !void {
         const alloc_info = vk.CommandBufferAllocateInfo{
             .s_type = .command_buffer_allocate_info,
@@ -1147,6 +1290,17 @@ const HelloTriangleApplication = struct {
             self.vkd.cmdBindVertexBuffers(command_buffer, 0, 1, &vertex_buffers, &offsets);
 
             self.vkd.cmdBindIndexBuffer(command_buffer, self.index_buffer, 0, .uint16);
+
+            self.vkd.cmdBindDescriptorSets(
+                command_buffer,
+                .graphics,
+                self.pipeline_layout,   
+                0,
+                1,
+                @ptrCast(&self.descriptor_sets[self.current_frame]),
+                0,
+                null,
+            );
 
             self.vkd.cmdDrawIndexed(command_buffer, @intCast(self.indices.len), 1, 0, 0, 0);
 
@@ -1215,6 +1369,8 @@ const HelloTriangleApplication = struct {
             else => return error.FailedToAcquireSwapchainImage,
         }
 
+        try self.updateUniformBuffer(self.current_frame);
+
         try self.vkd.resetFences(self.device, 1, @ptrCast(&self.in_flight_fences[self.current_frame]));
 
         try self.vkd.resetCommandBuffer(self.command_buffers[self.current_frame], .{});
@@ -1275,6 +1431,34 @@ const HelloTriangleApplication = struct {
             return;
         }    
     }
+
+    fn updateUniformBuffer(self: *@This(), current_image: u32) !void {
+        const current_time = std.time.nanoTimestamp();
+        const time = @as(f32, @floatFromInt(start_time - current_time)) / std.time.ns_per_s;
+
+        var ubo = UniformBufferObject{
+            .model = Mat4.fromRotation(time * 90.0, Vec3.new(0.0, 0.0, 1.0)),
+            .view = za.lookAt(
+                Vec3.new(2.0, 2.0, 2.0),
+                Vec3.new(0.0, 0.0, 0.0),
+                Vec3.new(0.0, 0.0, 1.0),
+            ),
+            .proj = za.perspective(
+                45.0,
+                @as(f32, @floatFromInt(self.swapchain_extent.width)) / @as(f32, @floatFromInt(self.swapchain_extent.height)),
+                0.1,
+                10.0,
+            ),
+        };
+        
+        ubo.proj.data[1][1] *= -1;
+
+        std.mem.copyForwards(
+            u8,
+            @as([*]u8, @ptrCast(self.uniform_buffers_mapped[current_image].?))[0..@sizeOf(UniformBufferObject)],
+            &std.mem.toBytes(ubo)
+        );
+    }
 };
 
 fn createDebugMessengerCreateInfo() vk.DebugUtilsMessengerCreateInfoEXT {
@@ -1311,6 +1495,8 @@ fn cStringEql(str_1: [*:0]const u8, str_2: [*]const u8) bool {
 }
 
 pub fn main() !void {
+    start_time = std.time.nanoTimestamp();
+
     var app = HelloTriangleApplication.init(c_allocator);
     defer app.deinit();
     try app.run();

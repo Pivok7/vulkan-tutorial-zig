@@ -103,6 +103,13 @@ const apis: []const vk.ApiInfo = &.{
             .cmdCopyBuffer = true,
             .cmdBindIndexBuffer = true,
             .cmdDrawIndexed = true,
+            .createDescriptorSetLayout = true,
+            .destroyDescriptorSetLayout = true,
+            .createDescriptorPool = true,
+            .destroyDescriptorPool = true,
+            .allocateDescriptorSets = true,
+            .updateDescriptorSets = true,
+            .cmdBindDescriptorSets = true,
         },
     },
 };
