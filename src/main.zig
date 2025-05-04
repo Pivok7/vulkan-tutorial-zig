@@ -4,6 +4,7 @@ const glfw = @import("zglfw");
 const vk = @import("vulkan");
 const vk_ctx = @import("vk_context.zig");
 const za = @import("zalgebra");
+const zigimg = @import("zigimg");
 
 const Allocator = std.mem.Allocator;
 const c_allocator = std.heap.c_allocator;
@@ -168,6 +169,17 @@ const HelloTriangleApplication = struct {
     }
 
     pub fn run(self: *@This()) !void {
+        var image = try zigimg.Image.fromFilePath(self.allocator, "resources/color_star.png");
+        defer image.deinit();
+        std.debug.print("{d}\n", .{image.pixels.rgba32[0].r});
+        std.debug.print("{d}\n", .{image.pixels.rgba32[0].g});
+        std.debug.print("{d}\n", .{image.pixels.rgba32[0].b});
+        std.debug.print("{d}\n", .{image.pixels.rgba32[0].a});
+        std.debug.print("{d}\n", .{image.pixels.rgba32[12].r});
+        std.debug.print("{d}\n", .{image.pixels.rgba32[12].g});
+        std.debug.print("{d}\n", .{image.pixels.rgba32[12].b});
+        std.debug.print("{d}\n", .{image.pixels.rgba32[12].a});
+        
         try self.initWindow();
         try self.initVulkan();
         try self.mainLoop();

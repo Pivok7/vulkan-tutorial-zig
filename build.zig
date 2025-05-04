@@ -58,6 +58,12 @@ pub fn build(b: *std.Build) void {
     });
     exe.root_module.addImport("zalgebra", zalgebra.module("zalgebra"));
 
+    const zigimg_dependency = b.dependency("zigimg", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    exe.root_module.addImport("zigimg", zigimg_dependency.module("zigimg"));
     
     b.installArtifact(exe);
 

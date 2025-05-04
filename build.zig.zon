@@ -28,5 +28,10 @@
             .url = "git+https://github.com/kooparse/zalgebra#4095192e370472a34fddc7b7aa39ab6158643e3b",
             .hash = "zalgebra-0.0.0-aaiVSsJoAQDdwwbf0Umo7dN71EqXxA73MAioy1p9tGyz",
         },
+	// zigimg fork, because upstream doesn't support 0.14 yet
+        .zigimg = .{
+            .url = "https://github.com/zigimg/zigimg/archive/715d09fa60288e36aaa7fa289af9a1cf424cb631.tar.gz",
+            .hash = "zigimg-0.1.0-AAAAADaEEQAUk7NhyEoMne6NuXbm9cAo8TjqibTPXanN",
+        },
     },
 }
