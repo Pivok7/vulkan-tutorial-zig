@@ -94,6 +94,8 @@ const SwapChainSupportDetails = struct {
 };
 
 const HelloTriangleApplication = struct {
+    const Self = *@This();
+
     app_name: [:0]const u8 = "Vulkan Tutorial",
     allocator: Allocator = undefined,
 
@@ -140,6 +142,9 @@ const HelloTriangleApplication = struct {
 
     framebuffer_resized: bool = false,
 
+    texture_image: vk.Image = undefined,
+    texture_image_memory: vk.DeviceMemory = undefined,
+
     vertex_buffer: vk.Buffer = undefined,
     vertex_buffer_memory: vk.DeviceMemory = undefined,
     index_buffer: vk.Buffer = undefined,
@@ -168,24 +173,13 @@ const HelloTriangleApplication = struct {
         };
     }
 
-    pub fn run(self: *@This()) !void {
-        var image = try zigimg.Image.fromFilePath(self.allocator, "resources/color_star.png");
-        defer image.deinit();
-        std.debug.print("{d}\n", .{image.pixels.rgba32[0].r});
-        std.debug.print("{d}\n", .{image.pixels.rgba32[0].g});
-        std.debug.print("{d}\n", .{image.pixels.rgba32[0].b});
-        std.debug.print("{d}\n", .{image.pixels.rgba32[0].a});
-        std.debug.print("{d}\n", .{image.pixels.rgba32[12].r});
-        std.debug.print("{d}\n", .{image.pixels.rgba32[12].g});
-        std.debug.print("{d}\n", .{image.pixels.rgba32[12].b});
-        std.debug.print("{d}\n", .{image.pixels.rgba32[12].a});
-        
+    pub fn run(self: Self) !void {
         try self.initWindow();
         try self.initVulkan();
         try self.mainLoop();
     }
 
-    fn initVulkan(self: *@This()) !void {
+    fn initVulkan(self: Self) !void {
         try self.getRequiredExtensions();
         try self.createInstance();
         if (debug_mode) try self.setupDebugMessenger();
@@ -199,6 +193,7 @@ const HelloTriangleApplication = struct {
         try self.createGraphicsPipeline();
         try self.createFramebuffers();
         try self.createCommandPool();
+        try self.createTextureImage();
         try self.createVertexBuffer();
         try self.createIndexBuffer();
         try self.createUniformBuffers();
@@ -208,8 +203,11 @@ const HelloTriangleApplication = struct {
         try self.createSyncObjects();
     }
 
-    pub fn deinit(self: *@This()) void {
+    pub fn deinit(self: Self) void {
         self.cleanupSwapchain();
+
+        self.vkd.destroyImage(self.device, self.texture_image, null);
+        self.vkd.freeMemory(self.device, self.texture_image_memory, null);
 
         self.vkd.destroyPipeline(self.device, self.graphics_pipeline, null);
         self.vkd.destroyPipelineLayout(self.device, self.pipeline_layout, null);
@@ -222,6 +220,8 @@ const HelloTriangleApplication = struct {
             self.vkd.destroyBuffer(self.device, self.uniform_buffers[i], null);
             self.vkd.freeMemory(self.device, self.uniform_buffers_memory[i], null);
         }
+
+        // Free image data here
 
         self.vkd.destroyCommandPool(self.device, self.command_pool, null);
         self.vkd.destroyDescriptorPool(self.device, self.descriptor_pool, null);
@@ -252,7 +252,7 @@ const HelloTriangleApplication = struct {
         self.instance_extensions.deinit();
     }
 
-    fn mainLoop(self: *@This()) !void {
+    fn mainLoop(self: Self) !void {
         while (!glfw.windowShouldClose(self.window)) {
             while (glfw.getWindowAttribute(self.window, glfw.Window.Attribute.iconified)) {
                 if (glfw.windowShouldClose(self.window)) break;
@@ -266,7 +266,7 @@ const HelloTriangleApplication = struct {
         try self.vkd.deviceWaitIdle(self.device);
     }
 
-    fn initWindow(self: *@This()) !void {
+    fn initWindow(self: Self) !void {
         try glfw.init();
         std.log.debug("Initialized GLFW", .{});
 
@@ -289,7 +289,7 @@ const HelloTriangleApplication = struct {
         }
     }
 
-    fn getRequiredExtensions(self: *@This()) !void {
+    fn getRequiredExtensions(self: Self) !void {
         var glfw_extensions: [][*:0]const u8 = undefined;
         glfw_extensions = try glfw.getRequiredInstanceExtensions();
 
@@ -300,7 +300,7 @@ const HelloTriangleApplication = struct {
         self.instance_extensions = extensions;
     }
 
-    fn createInstance(self: *@This()) !void {
+    fn createInstance(self: Self) !void {
         self.vkb = try BaseDispatch.load(vk_ctx.glfwGetInstanceProcAddress);
 
         if (self.enable_validation_layers) {
@@ -330,7 +330,7 @@ const HelloTriangleApplication = struct {
         self.vki = try InstanceDispatch.load(self.instance, self.vkb.dispatch.vkGetInstanceProcAddr);
     }
 
-    fn setupDebugMessenger(self: *@This()) !void {
+    fn setupDebugMessenger(self: Self) !void {
         if (debug_mode) {
             const create_info = vk.DebugUtilsMessengerCreateInfoEXT{
                 .message_severity = .{ .verbose_bit_ext = true, .error_bit_ext = true, .warning_bit_ext = true },
@@ -342,12 +342,12 @@ const HelloTriangleApplication = struct {
         }
     }
 
-    fn createSurface(self: *@This()) !void {
+    fn createSurface(self: Self) !void {
         const result = vk_ctx.glfwCreateWindowSurface(self.instance, self.window, null, &self.surface);
         try VkAssert.withMessage(result, "Failed to create window surface!");
     }
 
-    fn checkValidationLayerSupport(self: *@This()) !bool {
+    fn checkValidationLayerSupport(self: Self) !bool {
         var layer_count: u32 = 0;
         var result = try self.vkb.enumerateInstanceLayerProperties(&layer_count, null);
         try VkAssert.withMessage(result, "Failed to enumerate instance layer properties.");
@@ -390,7 +390,7 @@ const HelloTriangleApplication = struct {
         return true;
     }
 
-    fn pickPhysicalDevice(self: *@This()) !void {
+    fn pickPhysicalDevice(self: Self) !void {
         var device_count: u32 = 0;
         var result = try self.vki.enumeratePhysicalDevices(self.instance, &device_count, null);
         try VkAssert.withMessage(result, "Failed to find a GPU with Vulkan support.");
@@ -416,7 +416,7 @@ const HelloTriangleApplication = struct {
         }
     }
 
-    fn isDeviceSuitable(self: *@This(), device: vk.PhysicalDevice) !bool {
+    fn isDeviceSuitable(self: Self, device: vk.PhysicalDevice) !bool {
         const indices: QueueFamilyIndices = try self.findQueueFamilies(device);
 
         const extensions_supported: bool = try self.checkDeviceExtensionSupport(device);
@@ -431,7 +431,7 @@ const HelloTriangleApplication = struct {
         return (indices.isComplete() and extensions_supported and swap_chain_adequate);
     }
 
-    fn findQueueFamilies(self: *@This(), device: vk.PhysicalDevice) !QueueFamilyIndices {
+    fn findQueueFamilies(self: Self, device: vk.PhysicalDevice) !QueueFamilyIndices {
         var indices: QueueFamilyIndices = .{};
 
         var queue_family_count: u32 = 0;
@@ -457,7 +457,7 @@ const HelloTriangleApplication = struct {
         return indices;
     }
 
-    fn checkDeviceExtensionSupport(self: *@This(), device: vk.PhysicalDevice) !bool {
+    fn checkDeviceExtensionSupport(self: Self, device: vk.PhysicalDevice) !bool {
         var extension_count: u32 = 0;
         var result = try self.vki.enumerateDeviceExtensionProperties(device, null, &extension_count, null);
         try VkAssert.basic(result);
@@ -489,7 +489,7 @@ const HelloTriangleApplication = struct {
         return true;
     }
 
-    fn querySwapChainSupport(self: *@This(), device: vk.PhysicalDevice) !SwapChainSupportDetails {
+    fn querySwapChainSupport(self: Self, device: vk.PhysicalDevice) !SwapChainSupportDetails {
         var details = try SwapChainSupportDetails.init(self.allocator);
 
         details.capabilities = try self.vki.getPhysicalDeviceSurfaceCapabilitiesKHR(device, self.surface);
@@ -517,7 +517,7 @@ const HelloTriangleApplication = struct {
         return details;
     }
 
-    fn createLogicalDevice(self: *@This()) !void {
+    fn createLogicalDevice(self: Self) !void {
         const indices: QueueFamilyIndices = try self.findQueueFamilies(self.physical_device);
 
         var unique_queue_families = std.ArrayList(u32).init(self.allocator);
@@ -539,7 +539,6 @@ const HelloTriangleApplication = struct {
         const queue_priority: f32 = 1.0;
         for (unique_queue_families.items, 0..) |queue_family, i| {
             queue_create_infos[i] = vk.DeviceQueueCreateInfo{
-                .s_type = .device_queue_create_info,
                 .queue_family_index = queue_family,
                 .queue_count = 1,
                 .p_queue_priorities = @ptrCast(&queue_priority),
@@ -549,7 +548,6 @@ const HelloTriangleApplication = struct {
         var device_features: vk.PhysicalDeviceFeatures = .{};
 
         var create_info = vk.DeviceCreateInfo{
-            .s_type = .device_create_info,
             .p_queue_create_infos = queue_create_infos.ptr,
             .queue_create_info_count = 1,
             .p_enabled_features = &device_features,
@@ -568,7 +566,7 @@ const HelloTriangleApplication = struct {
         std.log.debug("Created logical device", .{});
     }
 
-    fn cleanupSwapchain(self: *@This()) void {
+    fn cleanupSwapchain(self: Self) void {
         for (self.swapchain_framebuffers) |framebuffer| {
             self.vkd.destroyFramebuffer(self.device, framebuffer, null);
         }
@@ -580,7 +578,7 @@ const HelloTriangleApplication = struct {
         self.vkd.destroySwapchainKHR(self.device, self.swapchain, null);
     }
 
-    fn recreateSwapchain(self: *@This()) !void {
+    fn recreateSwapchain(self: Self) !void {
         std.log.debug("Recreating swapchain", .{});
 
         try self.vkd.deviceWaitIdle(self.device);
@@ -592,7 +590,7 @@ const HelloTriangleApplication = struct {
         try self.createFramebuffers();
     }
 
-    fn createSwapChain(self: *@This()) !void {
+    fn createSwapChain(self: Self) !void {
         var swap_chain_support: SwapChainSupportDetails = try self.querySwapChainSupport(self.physical_device);
         defer swap_chain_support.deinit();
 
@@ -609,7 +607,6 @@ const HelloTriangleApplication = struct {
         const queue_family_indices = [_]u32{ indices.graphics_family.?, indices.present_family.? };
 
         var create_info = vk.SwapchainCreateInfoKHR{
-            .s_type = .swapchain_create_info_khr,
             .surface = self.surface,
             .min_image_count = image_count,
             .image_format = surface_format.format,
@@ -670,7 +667,7 @@ const HelloTriangleApplication = struct {
         return .fifo_khr;
     }
 
-    fn chooseSwapExtent(self: *@This(), capabilities: *vk.SurfaceCapabilitiesKHR) vk.Extent2D {
+    fn chooseSwapExtent(self: Self, capabilities: *vk.SurfaceCapabilitiesKHR) vk.Extent2D {
         if (capabilities.current_extent.width != std.math.maxInt(u32)) {
             return capabilities.current_extent;
         } else {
@@ -688,12 +685,11 @@ const HelloTriangleApplication = struct {
         }
     }
 
-    fn createImageViews(self: *@This()) !void {
+    fn createImageViews(self: Self) !void {
         self.swapchain_image_views = try self.allocator.alloc(vk.ImageView, self.swapchain_images.len);
 
         for (self.swapchain_images, 0..) |image, i| {
             const create_info = vk.ImageViewCreateInfo{
-                .s_type = .image_view_create_info,
                 .image = image,
                 .view_type = .@"2d",
                 .format = self.swapchain_image_format,
@@ -717,7 +713,7 @@ const HelloTriangleApplication = struct {
         std.log.debug("Created image views", .{});
     }
 
-    fn createRenderPass(self: *@This()) !void {
+    fn createRenderPass(self: Self) !void {
         const color_attachment = vk.AttachmentDescription{
             .format = self.swapchain_image_format,
             .samples = .{ .@"1_bit" = true },
@@ -750,7 +746,6 @@ const HelloTriangleApplication = struct {
         };
 
         const render_pass_info = vk.RenderPassCreateInfo{
-            .s_type = .render_pass_create_info,
             .attachment_count = 1,
             .p_attachments = @ptrCast(&color_attachment),
             .subpass_count = 1,
@@ -763,7 +758,7 @@ const HelloTriangleApplication = struct {
         std.log.debug("Created render pass", .{});
     }
 
-    fn createDescriptorSetLayout(self: *@This()) !void {
+    fn createDescriptorSetLayout(self: Self) !void {
         const ubo_layout_binding = vk.DescriptorSetLayoutBinding{
             .binding = 0,
             .descriptor_type = .uniform_buffer,
@@ -773,7 +768,6 @@ const HelloTriangleApplication = struct {
         };
 
         const layout_info = vk.DescriptorSetLayoutCreateInfo{
-            .s_type = .descriptor_set_layout_create_info,
             .binding_count = 1,
             .p_bindings = @ptrCast(&ubo_layout_binding),
         };
@@ -781,7 +775,7 @@ const HelloTriangleApplication = struct {
         self.descriptor_set_layout = try self.vkd.createDescriptorSetLayout(self.device, &layout_info, null);
     }
 
-    fn createGraphicsPipeline(self: *@This()) !void {
+    fn createGraphicsPipeline(self: Self) !void {
         const vert_file align(@alignOf(u32)) = @embedFile("shaders/vert.spv").*;
         const frag_file align(@alignOf(u32)) = @embedFile("shaders/frag.spv").*;
 
@@ -794,14 +788,12 @@ const HelloTriangleApplication = struct {
         std.log.debug("Created fragment shader module", .{});
 
         const vert_shader_stage_info = vk.PipelineShaderStageCreateInfo{
-            .s_type = .pipeline_shader_stage_create_info,
             .stage = .{ .vertex_bit = true },
             .module = vert_shader_module,
             .p_name = "main",
         };
 
         const frag_shader_stage_info = vk.PipelineShaderStageCreateInfo{
-            .s_type = .pipeline_shader_stage_create_info,
             .stage = .{ .fragment_bit = true },
             .module = frag_shader_module,
             .p_name = "main",
@@ -816,7 +808,6 @@ const HelloTriangleApplication = struct {
         const attribute_description = Vertex.getAttributeDescriptions();
 
         const vertex_input_info = vk.PipelineVertexInputStateCreateInfo{
-            .s_type = .pipeline_vertex_input_state_create_info,
             .vertex_binding_description_count = 1,
             .vertex_attribute_description_count = @intCast(attribute_description.len),
             .p_vertex_binding_descriptions = @ptrCast(&binding_description),
@@ -824,13 +815,11 @@ const HelloTriangleApplication = struct {
         };
 
         const input_assembly = vk.PipelineInputAssemblyStateCreateInfo{
-            .s_type = .pipeline_input_assembly_state_create_info,
             .topology = .triangle_list,
             .primitive_restart_enable = vk.FALSE,
         };
 
         const viewport_state = vk.PipelineViewportStateCreateInfo{
-            .s_type = .pipeline_viewport_state_create_info,
             .viewport_count = 1,
             .scissor_count = 1,
         };
@@ -841,7 +830,6 @@ const HelloTriangleApplication = struct {
         };
 
         const rasterizer = vk.PipelineRasterizationStateCreateInfo{
-            .s_type = .pipeline_rasterization_state_create_info,
             .depth_clamp_enable = vk.FALSE,
             .rasterizer_discard_enable = vk.FALSE,
             .polygon_mode = .fill,
@@ -855,7 +843,6 @@ const HelloTriangleApplication = struct {
         };
 
         const multisampling = vk.PipelineMultisampleStateCreateInfo{
-            .s_type = .pipeline_multisample_state_create_info,
             .sample_shading_enable = vk.FALSE,
             .rasterization_samples = .{ .@"1_bit" = true },
             .min_sample_shading = 1.0,
@@ -881,7 +868,6 @@ const HelloTriangleApplication = struct {
         };
 
         const color_blending = vk.PipelineColorBlendStateCreateInfo{
-            .s_type = .pipeline_color_blend_state_create_info,
             .logic_op_enable = vk.FALSE,
             .logic_op = .copy,
             .attachment_count = 1,
@@ -890,13 +876,11 @@ const HelloTriangleApplication = struct {
         };
 
         const dynamic_state = vk.PipelineDynamicStateCreateInfo{
-            .s_type = .pipeline_dynamic_state_create_info,
             .dynamic_state_count = @intCast(dynamic_states.len),
             .p_dynamic_states = dynamic_states.ptr,
         };
 
         const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
-            .s_type = .pipeline_layout_create_info,
             .set_layout_count = 1,
             .p_set_layouts = @ptrCast(&self.descriptor_set_layout),
             .push_constant_range_count = 0,
@@ -907,7 +891,6 @@ const HelloTriangleApplication = struct {
         std.log.debug("Created pipeline layout", .{});
 
         const pipeline_info = vk.GraphicsPipelineCreateInfo{
-            .s_type = .graphics_pipeline_create_info,
             .stage_count = 2,
             .p_stages = @ptrCast(&shader_stages),
             .p_vertex_input_state = &vertex_input_info,
@@ -938,16 +921,15 @@ const HelloTriangleApplication = struct {
         std.log.debug("Created graphics pipeline", .{});
     }
 
-    fn createShaderModule(self: *@This(), code: []const u8) !vk.ShaderModule {
+    fn createShaderModule(self: Self, code: []const u8) !vk.ShaderModule {
         const create_info = vk.ShaderModuleCreateInfo{
-            .s_type = .shader_module_create_info,
             .code_size = code.len,
             .p_code = @ptrCast(@alignCast(code.ptr)),
         };
         return try self.vkd.createShaderModule(self.device, &create_info, null);
     }
 
-    fn createFramebuffers(self: *@This()) !void {
+    fn createFramebuffers(self: Self) !void {
         self.swapchain_framebuffers = try self.allocator.alloc(vk.Framebuffer, self.swapchain_image_views.len);
         errdefer self.allocator.free(self.swapchain_framebuffers);
 
@@ -957,7 +939,6 @@ const HelloTriangleApplication = struct {
             };
 
             const framebuffer_info = vk.FramebufferCreateInfo{
-                .s_type = .framebuffer_create_info,
                 .render_pass = self.render_pass,
                 .attachment_count = 1,
                 .p_attachments = &attachments,
@@ -971,11 +952,10 @@ const HelloTriangleApplication = struct {
         std.log.debug("Created framebuffers", .{});
     }
 
-    fn createCommandPool(self: *@This()) !void {
+    fn createCommandPool(self: Self) !void {
         const queue_family_indices = try self.findQueueFamilies(self.physical_device);
 
         const pool_info = vk.CommandPoolCreateInfo{
-            .s_type = .command_pool_create_info,
             .flags = .{ .reset_command_buffer_bit = true },
             .queue_family_index = queue_family_indices.graphics_family.?,
         };
@@ -984,7 +964,215 @@ const HelloTriangleApplication = struct {
         std.log.debug("Created command pool", .{});
     }
 
-    fn createVertexBuffer(self: *@This()) !void {
+    fn createTextureImage(self: Self) !void {
+        var image = try zigimg.Image.fromFilePath(self.allocator, "resources/color_star.png");
+        defer image.deinit();
+
+        const image_size: vk.DeviceSize = image.rawBytes().len;
+
+        var staging_buffer: vk.Buffer = undefined;
+        var staging_buffer_memory: vk.DeviceMemory = undefined;
+
+        try self.createBuffer(
+            image_size,
+            .{ .transfer_src_bit = true },
+            .{
+                .host_visible_bit = true,
+                .host_coherent_bit = true,
+            },
+            &staging_buffer,
+            &staging_buffer_memory,
+        );
+
+        const data = try self.vkd.mapMemory(self.device, staging_buffer_memory, 0, image_size, .{});
+        std.mem.copyForwards(u8, @as([*]u8, @ptrCast(data))[0..image_size], image.rawBytes());
+        self.vkd.unmapMemory(self.device, staging_buffer_memory);
+
+        try self.createImage(
+            @intCast(image.width),
+            @intCast(image.height),
+            .r8g8b8a8_srgb,
+            .optimal,
+            .{
+                .transfer_dst_bit = true,
+                .sampled_bit = true,
+            },
+            .{ .device_local_bit = true },
+            &self.texture_image,
+            &self.texture_image_memory,
+        );
+
+        try self.transitionImageLayout(
+            self.texture_image,
+            .r8g8b8a8_srgb,
+            .undefined,
+            .transfer_dst_optimal,
+        );
+
+        try self.copyBufferToImage(
+            staging_buffer,
+            self.texture_image,
+            @intCast(image.width),
+            @intCast(image.height),
+        );
+
+        try self.transitionImageLayout(
+            self.texture_image,
+            .r8g8b8a8_srgb,
+            .transfer_dst_optimal,
+            .shader_read_only_optimal,
+        );
+
+        self.vkd.destroyBuffer(self.device, staging_buffer, null);
+        self.vkd.freeMemory(self.device, staging_buffer_memory, null);
+    }
+
+    fn createImage(
+        self: Self,
+        width: u32,
+        height: u32,
+        format: vk.Format,
+        tiling: vk.ImageTiling,
+        usage: vk.ImageUsageFlags,
+        properties: vk.MemoryPropertyFlags,
+        image: *vk.Image,
+        image_memory: *vk.DeviceMemory,
+    ) !void {
+        const image_info = vk.ImageCreateInfo{
+            .image_type = .@"2d",
+            .extent = .{
+                .width = width,
+                .height = height,
+                .depth = 1,
+            },
+            .mip_levels = 1,
+            .array_layers = 1,
+            .format = format,
+            .tiling = tiling,
+            .initial_layout = .undefined,
+            .usage = usage,
+            .sharing_mode = .exclusive,
+            .samples = .{ .@"1_bit" = true },
+            .flags = .{},
+        };
+
+        image.* = self.vkd.createImage(self.device, &image_info, null) catch |err| {
+            std.log.err("Failed to created image!", .{});
+            return err;
+        };
+
+        const mem_requirements = self.vkd.getImageMemoryRequirements(self.device, image.*);
+
+        const alloc_info = vk.MemoryAllocateInfo{
+            .allocation_size = mem_requirements.size,
+            .memory_type_index = try self.findMemoryType(
+                mem_requirements.memory_type_bits,
+                properties,
+            ),
+        };
+
+        image_memory.* = self.vkd.allocateMemory(self.device, &alloc_info, null) catch |err| {
+            std.log.err("Failed to allocate image memory", .{});
+            return err;
+        };
+
+        try self.vkd.bindImageMemory(self.device, image.*, image_memory.*, 0);
+    }
+
+    fn transitionImageLayout(
+        self: Self,
+        image: vk.Image,
+        _: vk.Format,
+        old_layout: vk.ImageLayout,
+        new_layout: vk.ImageLayout,
+    ) !void {
+        const command_buffer = try self.beginSingleTimeCommands();
+
+        var barrier = vk.ImageMemoryBarrier{
+            .old_layout = old_layout,
+            .new_layout = new_layout,
+            .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+            .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+            .image = image,
+            .subresource_range = .{
+                .aspect_mask = .{ .color_bit = true },
+                .base_mip_level = 0,
+                .level_count = 1,
+                .base_array_layer = 0,
+                .layer_count = 1,
+            },
+            .src_access_mask = .{},
+            .dst_access_mask = .{},
+        };
+
+        var source_stage: vk.PipelineStageFlags = undefined;
+        var destination_stage: vk.PipelineStageFlags = undefined;
+
+        if (old_layout == .undefined and new_layout == .transfer_dst_optimal) {
+            barrier.src_access_mask = .{};
+            barrier.dst_access_mask = .{ .transfer_write_bit = true };
+            
+            source_stage = .{ .top_of_pipe_bit = true };
+            destination_stage = .{ .transfer_bit = true };
+        } else if (old_layout == .transfer_dst_optimal and new_layout == .shader_read_only_optimal) {
+            barrier.src_access_mask = .{ .transfer_read_bit = true };
+            barrier.dst_access_mask = .{ .shader_read_bit = true };
+
+            source_stage = .{ .transfer_bit = true };
+            destination_stage = .{ .fragment_shader_bit = true };
+        } else {
+            std.log.err("Unsupported layout transition", .{});
+            return error.UnsupportedLayoutTransition;
+        }
+
+        self.vkd.cmdPipelineBarrier(
+            command_buffer,
+            source_stage, destination_stage,
+            .{},
+            0, null,
+            0, null,
+            1, @ptrCast(&barrier),
+        );
+        
+        try self.endSingleTimeCommands(command_buffer);
+    }
+
+    fn copyBufferToImage(
+        self: Self,
+        buffer: vk.Buffer,
+        image: vk.Image,
+        width: u32,
+        height: u32,
+    ) !void {
+        const command_buffer = try self.beginSingleTimeCommands();
+
+        const region = vk.BufferImageCopy{
+            .buffer_offset = 0,
+            .buffer_row_length = 0,
+            .buffer_image_height = 0,
+            .image_subresource = .{
+                .aspect_mask = .{ .color_bit = true },
+                .mip_level = 0,
+                .base_array_layer = 0,
+                .layer_count = 1,
+            },
+            .image_offset = .{ .x = 0, .y = 0, .z = 0},
+            .image_extent = .{ .width = width, .height = height, .depth = 1 },
+        };
+
+        self.vkd.cmdCopyBufferToImage(
+            command_buffer,
+            buffer,
+            image,
+            .transfer_dst_optimal,
+            1,
+            @ptrCast(&region),
+        );
+
+        try self.endSingleTimeCommands(command_buffer);
+    }
+
+    fn createVertexBuffer(self: Self) !void {
         const buffer_size: vk.DeviceSize = @sizeOf(Vertex) * self.vertices.len;
 
         var staging_buffer: vk.Buffer = undefined;
@@ -1021,7 +1209,7 @@ const HelloTriangleApplication = struct {
         std.log.debug("Created vertex buffer", .{});
     }
 
-    fn createIndexBuffer(self: *@This()) !void {
+    fn createIndexBuffer(self: Self) !void {
         const buffer_size: vk.DeviceSize = @sizeOf(u16) * self.indices.len;
 
         var staging_buffer: vk.Buffer = undefined;
@@ -1058,9 +1246,8 @@ const HelloTriangleApplication = struct {
         std.log.debug("Created index buffer", .{});
     }
 
-    fn createBuffer(self: *@This(), size: vk.DeviceSize, usage: vk.BufferUsageFlags, properties: vk.MemoryPropertyFlags, buffer: *vk.Buffer, buffer_memory: *vk.DeviceMemory) !void {
+    fn createBuffer(self: Self, size: vk.DeviceSize, usage: vk.BufferUsageFlags, properties: vk.MemoryPropertyFlags, buffer: *vk.Buffer, buffer_memory: *vk.DeviceMemory) !void {
         const buffer_info = vk.BufferCreateInfo{
-            .s_type = .buffer_create_info,
             .size = size,
             .usage = usage,
             .sharing_mode = .exclusive,
@@ -1071,7 +1258,6 @@ const HelloTriangleApplication = struct {
         const mem_requirements = self.vkd.getBufferMemoryRequirements(self.device, buffer.*);
 
         const alloc_info = vk.MemoryAllocateInfo{
-            .s_type = .memory_allocate_info,
             .allocation_size = mem_requirements.size,
             .memory_type_index = try self.findMemoryType(mem_requirements.memory_type_bits, properties),
         };
@@ -1080,9 +1266,8 @@ const HelloTriangleApplication = struct {
         try self.vkd.bindBufferMemory(self.device, buffer.*, buffer_memory.*, 0);
     }
 
-    fn copyBuffer(self: *@This(), src_buffer: vk.Buffer, dst_buffer: vk.Buffer, size: vk.DeviceSize) !void {
+    fn beginSingleTimeCommands(self: Self) !vk.CommandBuffer {
         const alloc_info = vk.CommandBufferAllocateInfo{
-            .s_type = .command_buffer_allocate_info,
             .level = .primary,
             .command_pool = self.command_pool,
             .command_buffer_count = 1,
@@ -1092,22 +1277,17 @@ const HelloTriangleApplication = struct {
         try self.vkd.allocateCommandBuffers(self.device, &alloc_info, @ptrCast(&command_buffer));
 
         const begin_info = vk.CommandBufferBeginInfo{
-            .s_type = .command_buffer_begin_info,
             .flags = .{ .one_time_submit_bit = true },
         };
         try self.vkd.beginCommandBuffer(command_buffer, &begin_info);
 
-        const copy_region = vk.BufferCopy{
-            .src_offset = 0,
-            .dst_offset = 0,
-            .size = size,
-        };
-        self.vkd.cmdCopyBuffer(command_buffer, src_buffer, dst_buffer, 1, @ptrCast(&copy_region));
+        return command_buffer;
+    }
 
+    fn endSingleTimeCommands(self: Self, command_buffer: vk.CommandBuffer) !void {
         try self.vkd.endCommandBuffer(command_buffer);
 
         const submit_info = vk.SubmitInfo{
-            .s_type = .submit_info,
             .command_buffer_count = 1,
             .p_command_buffers = @ptrCast(&command_buffer),
         };
@@ -1118,20 +1298,34 @@ const HelloTriangleApplication = struct {
         self.vkd.freeCommandBuffers(self.device, self.command_pool, 1, @ptrCast(&command_buffer));
     }
 
-    fn findMemoryType(self: *@This(), type_filter: u32, properties: vk.MemoryPropertyFlags) !u32 {
+    fn copyBuffer(self: Self, src_buffer: vk.Buffer, dst_buffer: vk.Buffer, size: vk.DeviceSize) !void {
+        const command_buffer = try self.beginSingleTimeCommands();
+
+        const copy_region = vk.BufferCopy{
+            .src_offset = 0,
+            .dst_offset = 0,
+            .size = size,
+        };
+        self.vkd.cmdCopyBuffer(command_buffer, src_buffer, dst_buffer, 1, @ptrCast(&copy_region));
+
+        try self.endSingleTimeCommands(command_buffer);
+    }
+
+    fn findMemoryType(self: Self, type_filter: u32, properties: vk.MemoryPropertyFlags) !u32 {
         const mem_properties = self.vki.getPhysicalDeviceMemoryProperties(self.physical_device);
 
         for (0..mem_properties.memory_type_count) |i| {
             if (
             // Some evil magic to make compiler happy
-            (type_filter & (@as(u64, 1) << @intCast(i)) != 0) and (vk.MemoryPropertyFlags.intersect(mem_properties.memory_types[i].property_flags, properties) == properties)) {
+            (type_filter & (@as(u64, 1) << @intCast(i)) != 0)
+            and (vk.MemoryPropertyFlags.intersect(mem_properties.memory_types[i].property_flags, properties) == properties)) {
                 return @intCast(i);
             }
         }
         return error.NoSuitableMemoryType;
     }
 
-    fn createUniformBuffers(self: *@This()) !void {
+    fn createUniformBuffers(self: Self) !void {
         const buffer_size: vk.DeviceSize = @sizeOf(UniformBufferObject);
 
         self.uniform_buffers = try self.allocator.alloc(vk.Buffer, self.max_frames_in_flight);
@@ -1156,14 +1350,13 @@ const HelloTriangleApplication = struct {
         std.log.debug("Created uniform buffers", .{});
     }
 
-    fn createDescriptorPool(self: *@This()) !void {
+    fn createDescriptorPool(self: Self) !void {
         const pool_size = vk.DescriptorPoolSize{
             .type = .uniform_buffer,
             .descriptor_count = @intCast(self.max_frames_in_flight),
         };
 
         const pool_info = vk.DescriptorPoolCreateInfo{
-            .s_type = .descriptor_pool_create_info,
             .pool_size_count = 1,
             .p_pool_sizes = @ptrCast(&pool_size),
             .max_sets = @intCast(self.max_frames_in_flight),
@@ -1174,7 +1367,7 @@ const HelloTriangleApplication = struct {
         std.log.debug("Created descriptor pool", .{});
     }
 
-    fn createDescriptorSets(self: *@This()) !void {
+    fn createDescriptorSets(self: Self) !void {
         const layouts = try self.allocator.alloc(vk.DescriptorSetLayout, self.max_frames_in_flight);
         defer self.allocator.free(layouts);
 
@@ -1183,7 +1376,6 @@ const HelloTriangleApplication = struct {
         }
 
         const alloc_info = vk.DescriptorSetAllocateInfo{
-            .s_type = .descriptor_set_allocate_info,
             .descriptor_pool = self.descriptor_pool,
             .descriptor_set_count = @intCast(self.max_frames_in_flight),
             .p_set_layouts = layouts.ptr,
@@ -1201,7 +1393,6 @@ const HelloTriangleApplication = struct {
             };
 
             const descriptor_write = vk.WriteDescriptorSet{
-                .s_type = .write_descriptor_set,
                 .dst_set = self.descriptor_sets[i],
                 .dst_binding = 0,
                 .dst_array_element = 0,
@@ -1218,9 +1409,8 @@ const HelloTriangleApplication = struct {
         std.log.debug("Created descriptor sets", .{});
     }
 
-    fn createCommandBuffers(self: *@This()) !void {
+    fn createCommandBuffers(self: Self) !void {
         const alloc_info = vk.CommandBufferAllocateInfo{
-            .s_type = .command_buffer_allocate_info,
             .command_pool = self.command_pool,
             .level = .primary,
             .command_buffer_count = self.max_frames_in_flight,
@@ -1233,9 +1423,8 @@ const HelloTriangleApplication = struct {
         std.log.debug("Created command buffers", .{});
     }
 
-    fn recordCommandBuffer(self: *@This(), command_buffer: vk.CommandBuffer, image_index: u32) !void {
+    fn recordCommandBuffer(self: Self, command_buffer: vk.CommandBuffer, image_index: u32) !void {
         const begin_info = vk.CommandBufferBeginInfo{
-            .s_type = .command_buffer_begin_info,
             .flags = .{},
             .p_inheritance_info = null,
         };
@@ -1245,7 +1434,6 @@ const HelloTriangleApplication = struct {
         const clear_color = vk.ClearValue{ .color = .{ .float_32 = [4]f32{ 0.0, 0.0, 0.0, 1.0 } } };
 
         const render_pass_info = vk.RenderPassBeginInfo{
-            .s_type = .render_pass_begin_info,
             .render_pass = self.render_pass,
             .framebuffer = self.swapchain_framebuffers[image_index],
             .render_area = .{
@@ -1300,13 +1488,10 @@ const HelloTriangleApplication = struct {
         try self.vkd.endCommandBuffer(command_buffer);
     }
 
-    fn createSyncObjects(self: *@This()) !void {
-        const sempahore_info = vk.SemaphoreCreateInfo{
-            .s_type = .semaphore_create_info,
-        };
+    fn createSyncObjects(self: Self) !void {
+        const sempahore_info = vk.SemaphoreCreateInfo{};
 
         const fence_info = vk.FenceCreateInfo{
-            .s_type = .fence_create_info,
             .flags = .{ .signaled_bit = true },
         };
 
@@ -1328,7 +1513,7 @@ const HelloTriangleApplication = struct {
         std.log.debug("Created sync objects", .{});
     }
 
-    fn drawFrame(self: *@This()) !void {
+    fn drawFrame(self: Self) !void {
         defer self.current_frame = (self.current_frame + 1) % self.max_frames_in_flight;
 
         var result = try self.vkd.waitForFences(self.device, 1, @ptrCast(&self.in_flight_fences[self.current_frame]), vk.TRUE, std.math.maxInt(u64));
@@ -1367,7 +1552,6 @@ const HelloTriangleApplication = struct {
         const signal_semaphores = [_]vk.Semaphore{self.render_finished_semaphores[self.current_frame]};
 
         const submit_info = vk.SubmitInfo{
-            .s_type = .submit_info,
             .wait_semaphore_count = @intCast(wait_semaphores.len),
             .p_wait_semaphores = &wait_semaphores,
             .p_wait_dst_stage_mask = &wait_stages,
@@ -1382,7 +1566,6 @@ const HelloTriangleApplication = struct {
         const swapchains = [_]vk.SwapchainKHR{self.swapchain};
 
         const present_info = vk.PresentInfoKHR{
-            .s_type = .present_info_khr,
             .wait_semaphore_count = 1,
             .p_wait_semaphores = @ptrCast(&signal_semaphores),
             .swapchain_count = 1,
@@ -1418,7 +1601,7 @@ const HelloTriangleApplication = struct {
         }
     }
 
-    fn updateUniformBuffer(self: *@This(), current_image: u32) !void {
+    fn updateUniformBuffer(self: Self, current_image: u32) !void {
         const current_time = std.time.nanoTimestamp();
         const time = @as(f32, @floatFromInt(start_time - current_time)) / std.time.ns_per_s;
 

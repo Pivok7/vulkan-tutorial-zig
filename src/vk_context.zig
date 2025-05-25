@@ -110,6 +110,12 @@ const apis: []const vk.ApiInfo = &.{
             .allocateDescriptorSets = true,
             .updateDescriptorSets = true,
             .cmdBindDescriptorSets = true,
+            .createImage = true,
+            .getImageMemoryRequirements = true,
+            .bindImageMemory = true,
+            .cmdPipelineBarrier = true,
+            .cmdCopyBufferToImage = true,
+            .destroyImage = true,
         },
     },
 };
