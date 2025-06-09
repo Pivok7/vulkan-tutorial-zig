@@ -36,6 +36,10 @@ Licensed under the MIT License.
 Licensed under the MIT License.
 
 
+* zig-img https://github.com/zigimg/zigimg <br>
+Licensed under the MIT License.
+
+
 * Parts of the code borrowed from here: <br>
 https://github.com/Cy-Tek/vulkan-tutorial-zig/tree/main
 
