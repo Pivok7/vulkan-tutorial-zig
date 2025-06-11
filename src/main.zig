@@ -215,10 +215,13 @@ const HelloTriangleApplication = struct {
 
         for (0..self.max_frames_in_flight) |i| {
             self.vkd.destroyFence(self.device, self.in_flight_fences[i], null);
-            self.vkd.destroySemaphore(self.device, self.render_finished_semaphores[i], null);
             self.vkd.destroySemaphore(self.device, self.image_available_semaphores[i], null);
             self.vkd.destroyBuffer(self.device, self.uniform_buffers[i], null);
             self.vkd.freeMemory(self.device, self.uniform_buffers_memory[i], null);
+        }
+
+        for (0..self.swapchain_images.len) |i| {
+            self.vkd.destroySemaphore(self.device, self.render_finished_semaphores[i], null);
         }
 
         // Free image data here
@@ -1498,7 +1501,7 @@ const HelloTriangleApplication = struct {
         self.image_available_semaphores = try self.allocator.alloc(vk.Semaphore, self.max_frames_in_flight);
         errdefer self.allocator.free(self.image_available_semaphores);
 
-        self.render_finished_semaphores = try self.allocator.alloc(vk.Semaphore, self.max_frames_in_flight);
+        self.render_finished_semaphores = try self.allocator.alloc(vk.Semaphore, self.swapchain_images.len);
         errdefer self.allocator.free(self.render_finished_semaphores);
 
         self.in_flight_fences = try self.allocator.alloc(vk.Fence, self.max_frames_in_flight);
@@ -1506,8 +1509,11 @@ const HelloTriangleApplication = struct {
 
         for (0..self.max_frames_in_flight) |i| {
             self.image_available_semaphores[i] = try self.vkd.createSemaphore(self.device, &sempahore_info, null);
-            self.render_finished_semaphores[i] = try self.vkd.createSemaphore(self.device, &sempahore_info, null);
             self.in_flight_fences[i] = try self.vkd.createFence(self.device, &fence_info, null);
+        }
+
+        for (0..self.swapchain_images.len) |i| {
+            self.render_finished_semaphores[i] = try self.vkd.createSemaphore(self.device, &sempahore_info, null);
         }
 
         std.log.debug("Created sync objects", .{});
@@ -1549,7 +1555,7 @@ const HelloTriangleApplication = struct {
 
         const wait_semaphores = [_]vk.Semaphore{self.image_available_semaphores[self.current_frame]};
         const wait_stages = [_]vk.PipelineStageFlags{.{ .color_attachment_output_bit = true }};
-        const signal_semaphores = [_]vk.Semaphore{self.render_finished_semaphores[self.current_frame]};
+        const signal_semaphores = [_]vk.Semaphore{self.render_finished_semaphores[next_image.image_index]};
 
         const submit_info = vk.SubmitInfo{
             .wait_semaphore_count = @intCast(wait_semaphores.len),
