@@ -1,19 +1,8 @@
 .{
     .name = .vulkan_tutorial_zig,
-
     .version = "1.0.0",
-
+    .minimum_zig_version = "0.14.0",
     .fingerprint = 0x130789c4309112b0, // Changing this has security and trust implications.
-
-    .paths = .{
-        "build.zig",
-        "build.zig.zon",
-        "src",
-        "vk_source",
-        "lib_windows",
-        "LICENSE",
-        "README.md",
-    },
 
     .dependencies = .{
         .zglfw = .{
@@ -24,5 +13,14 @@
             .url = "git+https://github.com/Snektron/vulkan-zig#dcd538828c513919c3abf0bd55afacdce0576c61",
             .hash = "vulkan-0.0.0-r7Ytxy5bAwASnqFlLMD4V42z3LolS8n7xv3RlbXhAhv0",
         },
+    },
+
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "vk_source",
+        "LICENSE",
+        "README.md",
     },
 }

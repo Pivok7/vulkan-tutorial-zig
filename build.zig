@@ -1,44 +1,22 @@
 const std = @import("std");
-const builtin = @import("builtin");
 
 fn buildLog(comptime string: []const u8, args: anytype) !void {
     std.debug.print("build: " ++ string, args);
 }
 
 pub fn build(b: *std.Build) void {
-
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+
     const exe = b.addExecutable(.{
         .name = "hello-triangle",
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
+        .strip = .optimize != .Debug,
     });
     
     // Libraries
-    
-    exe.linkLibC();
-
-    const os_tag = target.query.os_tag orelse builtin.target.os.tag;
-    switch (os_tag) {
-        .windows => {
-            // Disable console window in Release mode
-            if (optimize != .Debug) exe.subsystem = .Windows;
-
-            // This library is needed for static linking with glfw
-            exe.linkSystemLibrary("gdi32");
-            exe.addObjectFile(b.path("lib_windows/libglfw3.a"));
-        },
-        .linux => {
-            exe.linkSystemLibrary("glfw3");
-        },
-        else => {
-            std.log.warn("{} may be unsuported", .{os_tag});
-            exe.linkSystemLibrary("glfw3");
-        },
-    }
-
     const vulkan = b.dependency("vulkan_zig", .{
         .target = target,
         .optimize = optimize,
@@ -51,6 +29,10 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     exe.root_module.addImport("zglfw", zglfw.module("root"));
+
+    if (target.result.os.tag != .emscripten) {
+        exe.linkLibrary(zglfw.artifact("glfw"));
+    }
     
     b.installArtifact(exe);
 
