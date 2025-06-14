@@ -28,6 +28,7 @@ const Mat4 = za.Mat4;
 const Vertex = struct {
     pos: Vec2 = Vec2.zero(),
     color: Vec3 = Vec3.zero(),
+    tex_coord: Vec2 = Vec2.zero(),
 
     pub fn getBindingDesciption() vk.VertexInputBindingDescription {
         return vk.VertexInputBindingDescription{
@@ -38,17 +39,24 @@ const Vertex = struct {
     }
 
     pub fn getAttributeDescriptions() []const vk.VertexInputAttributeDescription {
-        return &[_]vk.VertexInputAttributeDescription{ .{
-            .binding = 0,
-            .location = 0,
-            .format = .r32g32_sfloat,
-            .offset = @offsetOf(Vertex, "pos"),
-        }, .{
-            .binding = 0,
-            .location = 1,
-            .format = .r32g32b32_sfloat,
-            .offset = @offsetOf(Vertex, "color"),
-        } };
+        return &[_]vk.VertexInputAttributeDescription{
+            .{
+                .binding = 0,
+                .location = 0,
+                .format = .r32g32_sfloat,
+                .offset = @offsetOf(Vertex, "pos"),
+            }, .{
+                .binding = 0,
+                .location = 1,
+                .format = .r32g32b32_sfloat,
+                .offset = @offsetOf(Vertex, "color"),
+            }, .{
+                .binding = 0,
+                .location = 2,
+                .format = .r32g32_sfloat,
+                .offset = @offsetOf(Vertex, "tex_coord"),
+            },
+        };
     }
 };
 
@@ -144,6 +152,8 @@ const HelloTriangleApplication = struct {
 
     texture_image: vk.Image = undefined,
     texture_image_memory: vk.DeviceMemory = undefined,
+    texture_image_view: vk.ImageView = undefined,
+    texture_sampler: vk.Sampler = undefined,
 
     vertex_buffer: vk.Buffer = undefined,
     vertex_buffer_memory: vk.DeviceMemory = undefined,
@@ -158,10 +168,10 @@ const HelloTriangleApplication = struct {
     descriptor_sets: []vk.DescriptorSet = undefined,
 
     vertices: []const Vertex = &[_]Vertex{
-        Vertex{ .pos = Vec2.new(-0.5, -0.5), .color = Vec3.new(1.0, 0.0, 0.0) },
-        Vertex{ .pos = Vec2.new(0.5, -0.5), .color = Vec3.new(0.0, 1.0, 0.0) },
-        Vertex{ .pos = Vec2.new(0.5, 0.5), .color = Vec3.new(0.0, 0.0, 1.0) },
-        Vertex{ .pos = Vec2.new(-0.5, 0.5), .color = Vec3.new(1.0, 1.0, 1.0) },
+        Vertex{ .pos = Vec2.new(-0.5, -0.5), .color = Vec3.new(1.0, 0.0, 0.0), .tex_coord = Vec2.new(1.0, 0.0) },
+        Vertex{ .pos = Vec2.new(0.5, -0.5), .color = Vec3.new(0.0, 1.0, 0.0), .tex_coord = Vec2.new(0.0, 0.0) },
+        Vertex{ .pos = Vec2.new(0.5, 0.5), .color = Vec3.new(0.0, 0.0, 1.0), .tex_coord = Vec2.new(0.0, 1.0) },
+        Vertex{ .pos = Vec2.new(-0.5, 0.5), .color = Vec3.new(1.0, 1.0, 1.0), .tex_coord = Vec2.new(1.0, 1.0) },
     },
 
     indices: []const u16 = &[_]u16{ 0, 1, 2, 2, 3, 0 },
@@ -194,6 +204,8 @@ const HelloTriangleApplication = struct {
         try self.createFramebuffers();
         try self.createCommandPool();
         try self.createTextureImage();
+        try self.createTextureImageView();
+        try self.createTextureSampler();
         try self.createVertexBuffer();
         try self.createIndexBuffer();
         try self.createUniformBuffers();
@@ -206,6 +218,8 @@ const HelloTriangleApplication = struct {
     pub fn deinit(self: Self) void {
         self.cleanupSwapchain();
 
+        self.vkd.destroySampler(self.device, self.texture_sampler, null);
+        self.vkd.destroyImageView(self.device, self.texture_image_view, null);
         self.vkd.destroyImage(self.device, self.texture_image, null);
         self.vkd.freeMemory(self.device, self.texture_image_memory, null);
 
@@ -223,8 +237,6 @@ const HelloTriangleApplication = struct {
         for (0..self.swapchain_images.len) |i| {
             self.vkd.destroySemaphore(self.device, self.render_finished_semaphores[i], null);
         }
-
-        // Free image data here
 
         self.vkd.destroyCommandPool(self.device, self.command_pool, null);
         self.vkd.destroyDescriptorPool(self.device, self.descriptor_pool, null);
@@ -431,7 +443,14 @@ const HelloTriangleApplication = struct {
             swap_chain_adequate = swap_chain_support.formats.items.len != 0 and swap_chain_support.present_modes.items.len != 0;
         }
 
-        return (indices.isComplete() and extensions_supported and swap_chain_adequate);
+        const supported_features = self.vki.getPhysicalDeviceFeatures(device);
+
+        return (
+            indices.isComplete() and
+            extensions_supported and
+            swap_chain_adequate and
+            supported_features.sampler_anisotropy == vk.TRUE
+        );
     }
 
     fn findQueueFamilies(self: Self, device: vk.PhysicalDevice) !QueueFamilyIndices {
@@ -548,7 +567,9 @@ const HelloTriangleApplication = struct {
             };
         }
 
-        var device_features: vk.PhysicalDeviceFeatures = .{};
+        var device_features: vk.PhysicalDeviceFeatures = .{
+            .sampler_anisotropy = vk.TRUE,
+        };
 
         var create_info = vk.DeviceCreateInfo{
             .p_queue_create_infos = queue_create_infos.ptr,
@@ -692,26 +713,7 @@ const HelloTriangleApplication = struct {
         self.swapchain_image_views = try self.allocator.alloc(vk.ImageView, self.swapchain_images.len);
 
         for (self.swapchain_images, 0..) |image, i| {
-            const create_info = vk.ImageViewCreateInfo{
-                .image = image,
-                .view_type = .@"2d",
-                .format = self.swapchain_image_format,
-                .components = .{
-                    .r = .identity,
-                    .g = .identity,
-                    .b = .identity,
-                    .a = .identity,
-                },
-                .subresource_range = .{
-                    .aspect_mask = .{ .color_bit = true },
-                    .base_mip_level = 0,
-                    .level_count = 1,
-                    .base_array_layer = 0,
-                    .layer_count = 1,
-                },
-            };
-
-            self.swapchain_image_views[i] = try self.vkd.createImageView(self.device, &create_info, null);
+            self.swapchain_image_views[i] = try self.createImageView(image, self.swapchain_image_format);
         }
         std.log.debug("Created image views", .{});
     }
@@ -770,9 +772,22 @@ const HelloTriangleApplication = struct {
             .p_immutable_samplers = null,
         };
 
+        const sampler_layout_binding = vk.DescriptorSetLayoutBinding{
+            .binding = 1,
+            .descriptor_count = 1,
+            .descriptor_type = .combined_image_sampler,
+            .p_immutable_samplers = null,
+            .stage_flags = .{ .fragment_bit = true }, 
+        };
+
+        const bindings = [_]vk.DescriptorSetLayoutBinding{
+            ubo_layout_binding,
+            sampler_layout_binding,
+        };
+
         const layout_info = vk.DescriptorSetLayoutCreateInfo{
-            .binding_count = 1,
-            .p_bindings = @ptrCast(&ubo_layout_binding),
+            .binding_count = @intCast(bindings.len),
+            .p_bindings = &bindings,
         };
 
         self.descriptor_set_layout = try self.vkd.createDescriptorSetLayout(self.device, &layout_info, null);
@@ -969,6 +984,7 @@ const HelloTriangleApplication = struct {
 
     fn createTextureImage(self: Self) !void {
         var image = try zigimg.Image.fromFilePath(self.allocator, "resources/color_star.png");
+        try image.convert(.rgba32);
         defer image.deinit();
 
         const image_size: vk.DeviceSize = image.rawBytes().len;
@@ -1030,6 +1046,34 @@ const HelloTriangleApplication = struct {
         self.vkd.freeMemory(self.device, staging_buffer_memory, null);
     }
 
+    fn createTextureImageView(self: Self) !void {
+        self.texture_image_view = try self.createImageView(self.texture_image, .r8g8b8a8_srgb);
+
+        std.log.debug("Created texture view", .{});
+    }
+
+    fn createTextureSampler(self: Self) !void {
+        const sampler_info = vk.SamplerCreateInfo{
+            .mag_filter = .linear,
+            .min_filter = .linear,
+            .address_mode_u = .repeat,
+            .address_mode_v = .repeat,
+            .address_mode_w = .repeat,
+            .anisotropy_enable = vk.TRUE,
+            .max_anisotropy = self.vki.getPhysicalDeviceProperties(self.physical_device).limits.max_sampler_anisotropy,
+            .border_color = .int_opaque_black,
+            .unnormalized_coordinates = vk.FALSE,
+            .compare_enable = vk.FALSE,
+            .compare_op = .always,
+            .mipmap_mode = .linear,
+            .mip_lod_bias = 0.0,
+            .min_lod = 0.0,
+            .max_lod = 0.0,
+        };
+
+        self.texture_sampler = try self.vkd.createSampler(self.device, &sampler_info, null);
+    }
+
     fn createImage(
         self: Self,
         width: u32,
@@ -1080,6 +1124,29 @@ const HelloTriangleApplication = struct {
         };
 
         try self.vkd.bindImageMemory(self.device, image.*, image_memory.*, 0);
+    }
+
+    fn createImageView(self: Self, image: vk.Image, format: vk.Format) !vk.ImageView {
+        const view_info = vk.ImageViewCreateInfo{
+            .image = image,
+            .view_type = .@"2d",
+            .format = format,
+            .components = .{
+                .r = .identity,
+                .g = .identity,
+                .b = .identity,
+                .a = .identity,
+            },
+            .subresource_range = .{
+                .aspect_mask = .{ .color_bit = true },
+                .base_mip_level = 0,
+                .level_count = 1,
+                .base_array_layer = 0,
+                .layer_count = 1,
+            },
+        };
+
+        return try self.vkd.createImageView(self.device, &view_info, null);
     }
 
     fn transitionImageLayout(
@@ -1354,14 +1421,19 @@ const HelloTriangleApplication = struct {
     }
 
     fn createDescriptorPool(self: Self) !void {
-        const pool_size = vk.DescriptorPoolSize{
-            .type = .uniform_buffer,
-            .descriptor_count = @intCast(self.max_frames_in_flight),
+        const pool_sizes = [_]vk.DescriptorPoolSize{
+            .{
+                .type = .uniform_buffer,
+                .descriptor_count = @intCast(self.max_frames_in_flight),
+            }, .{
+                .type = .combined_image_sampler,
+                .descriptor_count = @intCast(self.max_frames_in_flight),
+            }
         };
 
         const pool_info = vk.DescriptorPoolCreateInfo{
-            .pool_size_count = 1,
-            .p_pool_sizes = @ptrCast(&pool_size),
+            .pool_size_count = pool_sizes.len,
+            .p_pool_sizes = &pool_sizes,
             .max_sets = @intCast(self.max_frames_in_flight),
         };
 
@@ -1395,18 +1467,42 @@ const HelloTriangleApplication = struct {
                 .range = @sizeOf(UniformBufferObject),
             };
 
-            const descriptor_write = vk.WriteDescriptorSet{
-                .dst_set = self.descriptor_sets[i],
-                .dst_binding = 0,
-                .dst_array_element = 0,
-                .descriptor_type = .uniform_buffer,
-                .descriptor_count = 1,
-                .p_buffer_info = @ptrCast(&buffer_info),
-                .p_image_info = undefined,
-                .p_texel_buffer_view = undefined,
+            const image_info = vk.DescriptorImageInfo{
+                .image_layout = .shader_read_only_optimal,
+                .image_view = self.texture_image_view,
+                .sampler = self.texture_sampler,
             };
 
-            self.vkd.updateDescriptorSets(self.device, 1, @ptrCast(&descriptor_write), 0, null);
+            const descriptor_writes = [_]vk.WriteDescriptorSet{
+                .{
+                    .dst_set = self.descriptor_sets[i],
+                    .dst_binding = 0,
+                    .dst_array_element = 0,
+                    .descriptor_type = .uniform_buffer,
+                    .descriptor_count = 1,
+                    .p_buffer_info = @ptrCast(&buffer_info),
+                    .p_image_info = undefined,
+                    .p_texel_buffer_view = undefined,
+                    
+                }, .{
+                    .dst_set = self.descriptor_sets[i],
+                    .dst_binding = 1,
+                    .dst_array_element = 0,
+                    .descriptor_type = .combined_image_sampler,
+                    .descriptor_count = 1,
+                    .p_buffer_info = undefined,
+                    .p_image_info = @ptrCast(&image_info),
+                    .p_texel_buffer_view = undefined,
+                }
+            };
+
+            self.vkd.updateDescriptorSets(
+                self.device,
+                @intCast(descriptor_writes.len),
+                &descriptor_writes,
+                0,
+                null
+            );
         }
 
         std.log.debug("Created descriptor sets", .{});

@@ -48,6 +48,7 @@ const apis: []const vk.ApiInfo = &.{
             .getPhysicalDeviceSurfaceFormatsKHR = true,
             .getPhysicalDeviceSurfacePresentModesKHR = true,
             .getPhysicalDeviceMemoryProperties = true,
+            .getPhysicalDeviceFeatures = true,
         },
         .device_commands = .{
             .getDeviceQueue = true,
@@ -116,6 +117,8 @@ const apis: []const vk.ApiInfo = &.{
             .cmdPipelineBarrier = true,
             .cmdCopyBufferToImage = true,
             .destroyImage = true,
+            .createSampler = true,
+            .destroySampler = true,
         },
     },
 };
