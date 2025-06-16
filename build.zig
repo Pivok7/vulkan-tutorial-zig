@@ -47,6 +47,11 @@ pub fn build(b: *std.Build) void {
 
     exe.root_module.addImport("zigimg", zigimg_dependency.module("zigimg"));
     
+    // Hide console on Windows when launching exe
+    if (target.result.os.tag == .windows and optimize != .Debug) {
+        exe.subsystem = .Windows;
+    }
+
     b.installArtifact(exe);
 
     // Shader compilation
