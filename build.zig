@@ -33,6 +33,11 @@ pub fn build(b: *std.Build) void {
     if (target.result.os.tag != .emscripten) {
         exe.linkLibrary(zglfw.artifact("glfw"));
     }
+
+    // Hide console on Windows when launching exe
+    if (target.result.os.tag == .windows and optimize != .Debug) {
+        exe.subsystem = .Windows;
+    }
     
     b.installArtifact(exe);
 
