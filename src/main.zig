@@ -101,7 +101,7 @@ const SwapChainSupportDetails = struct {
     }
 };
 
-const HelloTriangleApplication = struct {
+const VulkanApplication = struct {
     const Self = *@This();
 
     app_name: [:0]const u8 = "Vulkan Tutorial",
@@ -1764,7 +1764,7 @@ fn cStringEql(str_1: [*:0]const u8, str_2: [*]const u8) bool {
 pub fn main() !void {
     start_time = std.time.nanoTimestamp();
 
-    var app = HelloTriangleApplication.init(c_allocator);
+    var app = VulkanApplication.init(c_allocator);
     defer app.deinit();
     try app.run();
 }
