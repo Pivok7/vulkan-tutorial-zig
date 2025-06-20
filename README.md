@@ -2,7 +2,7 @@
 
 Project based on this tutorial: https://vulkan-tutorial.com/
 
-This branch covers only up to the Drawing chapter. For full tutorial check the full-tutorial branch
+This branch covers only the "Drawing a triangle" chapter. For full tutorial check the full-tutorial branch
 
 ## Building
 
