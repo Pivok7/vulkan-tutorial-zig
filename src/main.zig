@@ -26,7 +26,7 @@ const Vec3 = za.Vec3;
 const Mat4 = za.Mat4;
 
 const Vertex = struct {
-    pos: Vec2 = Vec2.zero(),
+    pos: Vec3 = Vec3.zero(),
     color: Vec3 = Vec3.zero(),
     tex_coord: Vec2 = Vec2.zero(),
 
@@ -43,7 +43,7 @@ const Vertex = struct {
             .{
                 .binding = 0,
                 .location = 0,
-                .format = .r32g32_sfloat,
+                .format = .r32g32b32_sfloat,
                 .offset = @offsetOf(Vertex, "pos"),
             }, .{
                 .binding = 0,
@@ -100,6 +100,24 @@ const SwapChainSupportDetails = struct {
         self.present_modes.deinit();
     }
 };
+
+/// Construct a perspective 4x4 matrix for Vulkan clip space.
+/// Note: Field of view is given in degrees.
+/// For more detail: https://www.vincentparizet.com/blog/posts/vulkan_perspective_matrix
+pub fn perspectiveVulkan(fovy_in_degrees: f32, aspect_ratio: f32, z_near: f32, z_far: f32) za.Mat4 {
+    const f = 1.0 / @tan(za.toRadians(fovy_in_degrees) * 0.5);
+    const A: f32 = z_near / (z_far - z_near);
+    const B: f32 = z_far * A;
+
+    return .{
+        .data = .{
+            .{ f / aspect_ratio, 0, 0, 0 },
+            .{ 0, -f, 0, 0 },
+            .{ 0, 0, A, -1.0 },
+            .{ 0, 0, B, 0 },
+        },
+    };
+}
 
 const HelloTriangleApplication = struct {
     const Self = *@This();
@@ -168,13 +186,21 @@ const HelloTriangleApplication = struct {
     descriptor_sets: []vk.DescriptorSet = undefined,
 
     vertices: []const Vertex = &[_]Vertex{
-        Vertex{ .pos = Vec2.new(-0.5, -0.5), .color = Vec3.new(1.0, 0.0, 0.0), .tex_coord = Vec2.new(1.0, 0.0) },
-        Vertex{ .pos = Vec2.new(0.5, -0.5), .color = Vec3.new(0.0, 1.0, 0.0), .tex_coord = Vec2.new(0.0, 0.0) },
-        Vertex{ .pos = Vec2.new(0.5, 0.5), .color = Vec3.new(0.0, 0.0, 1.0), .tex_coord = Vec2.new(0.0, 1.0) },
-        Vertex{ .pos = Vec2.new(-0.5, 0.5), .color = Vec3.new(1.0, 1.0, 1.0), .tex_coord = Vec2.new(1.0, 1.0) },
+        Vertex{ .pos = Vec3.new(-0.5, -0.5, -0.0), .color = Vec3.new(1.0, 0.0, 0.0), .tex_coord = Vec2.new(1.0, 0.0) },
+        Vertex{ .pos = Vec3.new(0.5, -0.5, 0.0), .color = Vec3.new(0.0, 1.0, 0.0), .tex_coord = Vec2.new(0.0, 0.0) },
+        Vertex{ .pos = Vec3.new(0.5, 0.5, 0.0), .color = Vec3.new(0.0, 0.0, 1.0), .tex_coord = Vec2.new(0.0, 1.0) },
+        Vertex{ .pos = Vec3.new(-0.5, 0.5, 0.0), .color = Vec3.new(1.0, 1.0, 1.0), .tex_coord = Vec2.new(1.0, 1.0) },
+
+        Vertex{ .pos = Vec3.new(-0.5, -0.5, -0.5), .color = Vec3.new(1.0, 0.0, 0.0), .tex_coord = Vec2.new(1.0, 0.0) },
+        Vertex{ .pos = Vec3.new(0.5, -0.5, -0.5), .color = Vec3.new(0.0, 1.0, 0.0), .tex_coord = Vec2.new(0.0, 0.0) },
+        Vertex{ .pos = Vec3.new(0.5, 0.5, -0.5), .color = Vec3.new(0.0, 0.0, 1.0), .tex_coord = Vec2.new(0.0, 1.0) },
+        Vertex{ .pos = Vec3.new(-0.5, 0.5, -0.5), .color = Vec3.new(1.0, 1.0, 1.0), .tex_coord = Vec2.new(1.0, 1.0) },
     },
 
-    indices: []const u16 = &[_]u16{ 0, 1, 2, 2, 3, 0 },
+    indices: []const u16 = &[_]u16{
+        0, 1, 2, 2, 3, 0,
+        4, 5, 6, 6, 7, 4,
+    },
 
     //-------------------------------------------
     pub fn init(allocator: Allocator) @This() {
@@ -1705,24 +1731,22 @@ const HelloTriangleApplication = struct {
 
     fn updateUniformBuffer(self: Self, current_image: u32) !void {
         const current_time = std.time.nanoTimestamp();
-        const time = @as(f32, @floatFromInt(start_time - current_time)) / std.time.ns_per_s;
+        const time = @as(f32, @floatFromInt(current_time - start_time)) / std.time.ns_per_s;
 
-        var ubo = UniformBufferObject{
+        const ubo = UniformBufferObject{
             .model = Mat4.fromRotation(time * 90.0, Vec3.new(0.0, 0.0, 1.0)),
             .view = za.lookAt(
                 Vec3.new(2.0, 2.0, 2.0),
                 Vec3.new(0.0, 0.0, 0.0),
                 Vec3.new(0.0, 0.0, 1.0),
             ),
-            .proj = za.perspective(
+            .proj = perspectiveVulkan(
                 45.0,
                 @as(f32, @floatFromInt(self.swapchain_extent.width)) / @as(f32, @floatFromInt(self.swapchain_extent.height)),
                 0.1,
                 10.0,
             ),
         };
-
-        ubo.proj.data[1][1] *= -1;
 
         std.mem.copyForwards(u8, @as([*]u8, @ptrCast(self.uniform_buffers_mapped[current_image].?))[0..@sizeOf(UniformBufferObject)], &std.mem.toBytes(ubo));
     }
