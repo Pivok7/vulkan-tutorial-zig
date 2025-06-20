@@ -2,6 +2,9 @@
 
 Project based on this tutorial: https://vulkan-tutorial.com/
 
+This branch covers only up to the Drawing chapter
+For full tutorial check full-tutorial branch
+
 ## Building
 
 You will need:
