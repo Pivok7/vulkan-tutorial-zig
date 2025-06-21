@@ -5,6 +5,7 @@ const vk = @import("vulkan");
 const vk_ctx = @import("vk_context.zig");
 const za = @import("zalgebra");
 const zigimg = @import("zigimg");
+const obj = @import("obj");
 
 const Allocator = std.mem.Allocator;
 const c_allocator = std.heap.c_allocator;
@@ -13,6 +14,9 @@ const VkAssert = vk_ctx.VkAssert;
 const BaseDispatch = vk_ctx.BaseDispatch;
 const InstanceDispatch = vk_ctx.InstanceDispatch;
 const DeviceDispatch = vk_ctx.DeviceDispatch;
+
+const model_path = "models/viking_room.obj";
+const model_texture_path = "models/viking_room.png";
 
 var start_time: i128 = undefined;
 
@@ -174,6 +178,8 @@ const VulkanApplication = struct {
     texture_image_view: vk.ImageView = undefined,
     texture_sampler: vk.Sampler = undefined,
 
+    vertices: std.ArrayList(Vertex) = undefined,
+    indices: std.ArrayList(u32) = undefined,
     vertex_buffer: vk.Buffer = undefined,
     vertex_buffer_memory: vk.DeviceMemory = undefined,
     index_buffer: vk.Buffer = undefined,
@@ -190,23 +196,6 @@ const VulkanApplication = struct {
     depth_image_memory: vk.DeviceMemory = undefined,
     depth_image_view: vk.ImageView = undefined,
 
-    // Coordinates are bit different becuase I decided to use Y up and front face culling
-    vertices: []const Vertex = &[_]Vertex{
-        Vertex{ .pos = Vec3.new(-0.5, 0.0, -0.5), .color = Vec3.new(1.0, 0.0, 0.0), .tex_coord = Vec2.new(1.0, 0.0) },
-        Vertex{ .pos = Vec3.new(0.5, 0.0, -0.5), .color = Vec3.new(0.0, 1.0, 0.0), .tex_coord = Vec2.new(0.0, 0.0) },
-        Vertex{ .pos = Vec3.new(0.5, 0.0, 0.5), .color = Vec3.new(0.0, 0.0, 1.0), .tex_coord = Vec2.new(0.0, 1.0) },
-        Vertex{ .pos = Vec3.new(-0.5, 0.0, 0.5), .color = Vec3.new(1.0, 1.0, 1.0), .tex_coord = Vec2.new(1.0, 1.0) },
-
-        Vertex{ .pos = Vec3.new(-0.5, -0.5, -0.5), .color = Vec3.new(1.0, 0.0, 0.0), .tex_coord = Vec2.new(1.0, 0.0) },
-        Vertex{ .pos = Vec3.new(0.5, -0.5, -0.5), .color = Vec3.new(0.0, 1.0, 0.0), .tex_coord = Vec2.new(0.0, 0.0) },
-        Vertex{ .pos = Vec3.new(0.5, -0.5, 0.5), .color = Vec3.new(0.0, 0.0, 1.0), .tex_coord = Vec2.new(0.0, 1.0) },
-        Vertex{ .pos = Vec3.new(-0.5, -0.5, 0.5), .color = Vec3.new(1.0, 1.0, 1.0), .tex_coord = Vec2.new(1.0, 1.0) },
-    },
-
-    indices: []const u16 = &[_]u16{
-        0, 1, 2, 2, 3, 0,
-        4, 5, 6, 6, 7, 4,
-    },
 
     //-------------------------------------------
     pub fn init(allocator: Allocator) @This() {
@@ -239,6 +228,7 @@ const VulkanApplication = struct {
         try self.createTextureImage();
         try self.createTextureImageView();
         try self.createTextureSampler();
+        try self.loadModel();
         try self.createVertexBuffer();
         try self.createIndexBuffer();
         try self.createUniformBuffers();
@@ -925,8 +915,7 @@ const VulkanApplication = struct {
             .rasterizer_discard_enable = vk.FALSE,
             .polygon_mode = .fill,
             .line_width = 1.0,
-            // Modified
-            .cull_mode = .{ .front_bit = true },
+            .cull_mode = .{ .back_bit = true },
             .front_face = .counter_clockwise,
             .depth_bias_enable = vk.FALSE,
             .depth_bias_constant_factor = 0.0,
@@ -1134,7 +1123,7 @@ const VulkanApplication = struct {
     }
 
     fn createTextureImage(self: *Self) !void {
-        var image = try zigimg.Image.fromFilePath(self.allocator, "resources/color_star.png");
+        var image = try zigimg.Image.fromMemory(self.allocator, @embedFile(model_texture_path));
         try image.convert(.rgba32);
         defer image.deinit();
 
@@ -1420,8 +1409,36 @@ const VulkanApplication = struct {
         try self.endSingleTimeCommands(command_buffer);
     }
 
+    fn loadModel(self: *Self) !void {
+        self.vertices = std.ArrayList(Vertex).init(self.allocator);
+        self.indices = std.ArrayList(u32).init(self.allocator);
+
+        var model = try obj.parseObj(self.allocator, @embedFile(model_path));
+        defer model.deinit(self.allocator);
+
+        for (model.meshes) |mesh| {
+            for (mesh.indices) |index| {
+                const vertex = Vertex{
+                    .pos = Vec3.new(
+                        model.vertices[3 * index.vertex.? + 1],
+                        model.vertices[3 * index.vertex.? + 2],
+                        model.vertices[3 * index.vertex.? + 0],
+                    ),
+                    .tex_coord = Vec2.new(
+                        model.tex_coords[2 * index.tex_coord.? + 0],
+                        1.0 - model.tex_coords[2 * index.tex_coord.? + 1],
+                    ),
+                    .color = Vec3.new(1.0, 1.0, 1.0),
+                };
+
+                try self.vertices.append(vertex);
+                try self.indices.append(@intCast(self.indices.items.len));
+            }
+        }
+    }
+
     fn createVertexBuffer(self: *Self) !void {
-        const buffer_size: vk.DeviceSize = @sizeOf(Vertex) * self.vertices.len;
+        const buffer_size: vk.DeviceSize = @sizeOf(Vertex) * self.vertices.items.len;
 
         var staging_buffer: vk.Buffer = undefined;
         var staging_buffer_memory: vk.DeviceMemory = undefined;
@@ -1438,7 +1455,7 @@ const VulkanApplication = struct {
         );
 
         const data = try self.vkd.mapMemory(self.device, staging_buffer_memory, 0, buffer_size, .{});
-        std.mem.copyForwards(u8, @as([*]u8, @ptrCast(data.?))[0..buffer_size], std.mem.sliceAsBytes(self.vertices));
+        std.mem.copyForwards(u8, @as([*]u8, @ptrCast(data.?))[0..buffer_size], std.mem.sliceAsBytes(self.vertices.items));
         self.vkd.unmapMemory(self.device, staging_buffer_memory);
 
         try self.createBuffer(
@@ -1458,7 +1475,7 @@ const VulkanApplication = struct {
     }
 
     fn createIndexBuffer(self: *Self) !void {
-        const buffer_size: vk.DeviceSize = @sizeOf(u16) * self.indices.len;
+        const buffer_size: vk.DeviceSize = @sizeOf(u32) * self.indices.items.len;
 
         var staging_buffer: vk.Buffer = undefined;
         var staging_buffer_memory: vk.DeviceMemory = undefined;
@@ -1475,7 +1492,7 @@ const VulkanApplication = struct {
         );
 
         const data = try self.vkd.mapMemory(self.device, staging_buffer_memory, 0, buffer_size, .{});
-        std.mem.copyForwards(u8, @as([*]u8, @ptrCast(data.?))[0..buffer_size], std.mem.sliceAsBytes(self.indices));
+        std.mem.copyForwards(u8, @as([*]u8, @ptrCast(data.?))[0..buffer_size], std.mem.sliceAsBytes(self.indices.items));
         self.vkd.unmapMemory(self.device, staging_buffer_memory);
 
         try self.createBuffer(
@@ -1753,7 +1770,7 @@ const VulkanApplication = struct {
         const offsets = [_]vk.DeviceSize{0};
         self.vkd.cmdBindVertexBuffers(command_buffer, 0, 1, &vertex_buffers, &offsets);
 
-        self.vkd.cmdBindIndexBuffer(command_buffer, self.index_buffer, 0, .uint16);
+        self.vkd.cmdBindIndexBuffer(command_buffer, self.index_buffer, 0, .uint32);
 
         self.vkd.cmdBindDescriptorSets(
             command_buffer,
@@ -1766,7 +1783,7 @@ const VulkanApplication = struct {
             null,
         );
 
-        self.vkd.cmdDrawIndexed(command_buffer, @intCast(self.indices.len), 1, 0, 0, 0);
+        self.vkd.cmdDrawIndexed(command_buffer, @intCast(self.indices.items.len), 1, 0, 0, 0);
 
         self.vkd.cmdEndRenderPass(command_buffer);
 
@@ -1895,7 +1912,7 @@ const VulkanApplication = struct {
 
         const ubo = UniformBufferObject{
             // Changed for Y up
-            .model = Mat4.fromRotation(time * 90.0, Vec3.new(0.0, 1.0, 0.0)),
+            .model = Mat4.fromRotation(@sin(time) * 15.0, Vec3.new(0.0, 1.0, 0.0)),
             .view = za.lookAt(
                 Vec3.new(2.0, 2.0, 2.0),
                 Vec3.new(0.0, 0.0, 0.0),

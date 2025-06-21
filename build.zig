@@ -24,29 +24,34 @@ pub fn build(b: *std.Build) void {
     }).module("vulkan-zig");
     exe.root_module.addImport("vulkan", vulkan);
 
-    const zglfw = b.dependency("zglfw", .{
+    const zglfw_dep = b.dependency("zglfw", .{
         .target = target,
         .optimize = optimize,
     });
-    exe.root_module.addImport("zglfw", zglfw.module("root"));
+    exe.root_module.addImport("zglfw", zglfw_dep.module("root"));
 
     if (target.result.os.tag != .emscripten) {
-        exe.linkLibrary(zglfw.artifact("glfw"));
+        exe.linkLibrary(zglfw_dep.artifact("glfw"));
     }
 
-    const zalgebra = b.dependency("zalgebra", .{
+    const zalgebra_dep = b.dependency("zalgebra", .{
         .target = target,
         .optimize = optimize,
     });
-    exe.root_module.addImport("zalgebra", zalgebra.module("zalgebra"));
+    exe.root_module.addImport("zalgebra", zalgebra_dep.module("zalgebra"));
 
-    const zigimg_dependency = b.dependency("zigimg", .{
+    const zigimg_dep = b.dependency("zigimg", .{
         .target = target,
         .optimize = optimize,
     });
-
-    exe.root_module.addImport("zigimg", zigimg_dependency.module("zigimg"));
+    exe.root_module.addImport("zigimg", zigimg_dep.module("zigimg"));
     
+    const obj_dep = b.dependency("obj", .{
+        .target = target,
+        .optimize = optimize
+    });
+    exe.root_module.addImport("obj", obj_dep.module("obj"));
+
     // Hide console on Windows when launching exe
     if (target.result.os.tag == .windows and optimize != .Debug) {
         exe.subsystem = .Windows;
