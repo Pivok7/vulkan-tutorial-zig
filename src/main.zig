@@ -103,8 +103,9 @@ const SwapChainSupportDetails = struct {
 
 /// Construct a perspective 4x4 matrix for Vulkan clip space.
 /// Note: Field of view is given in degrees.
+/// Note: Z is reversed
 /// For more detail: https://www.vincentparizet.com/blog/posts/vulkan_perspective_matrix
-pub fn perspectiveVulkan(fovy_in_degrees: f32, aspect_ratio: f32, z_near: f32, z_far: f32) za.Mat4 {
+pub fn perspectiveMatrix(fovy_in_degrees: f32, aspect_ratio: f32, z_near: f32, z_far: f32) za.Mat4 {
     const f = 1.0 / @tan(za.toRadians(fovy_in_degrees) * 0.5);
     const A: f32 = z_near / (z_far - z_near);
     const B: f32 = z_far * A;
@@ -189,16 +190,17 @@ const VulkanApplication = struct {
     depth_image_memory: vk.DeviceMemory = undefined,
     depth_image_view: vk.ImageView = undefined,
 
+    // Coordinates are bit different becuase I decided to use Y up and front face culling
     vertices: []const Vertex = &[_]Vertex{
-        Vertex{ .pos = Vec3.new(-0.5, -0.5, 0.0), .color = Vec3.new(1.0, 0.0, 0.0), .tex_coord = Vec2.new(1.0, 0.0) },
-        Vertex{ .pos = Vec3.new(0.5, -0.5, 0.0), .color = Vec3.new(0.0, 1.0, 0.0), .tex_coord = Vec2.new(0.0, 0.0) },
-        Vertex{ .pos = Vec3.new(0.5, 0.5, 0.0), .color = Vec3.new(0.0, 0.0, 1.0), .tex_coord = Vec2.new(0.0, 1.0) },
-        Vertex{ .pos = Vec3.new(-0.5, 0.5, 0.0), .color = Vec3.new(1.0, 1.0, 1.0), .tex_coord = Vec2.new(1.0, 1.0) },
+        Vertex{ .pos = Vec3.new(-0.5, 0.0, -0.5), .color = Vec3.new(1.0, 0.0, 0.0), .tex_coord = Vec2.new(1.0, 0.0) },
+        Vertex{ .pos = Vec3.new(0.5, 0.0, -0.5), .color = Vec3.new(0.0, 1.0, 0.0), .tex_coord = Vec2.new(0.0, 0.0) },
+        Vertex{ .pos = Vec3.new(0.5, 0.0, 0.5), .color = Vec3.new(0.0, 0.0, 1.0), .tex_coord = Vec2.new(0.0, 1.0) },
+        Vertex{ .pos = Vec3.new(-0.5, 0.0, 0.5), .color = Vec3.new(1.0, 1.0, 1.0), .tex_coord = Vec2.new(1.0, 1.0) },
 
         Vertex{ .pos = Vec3.new(-0.5, -0.5, -0.5), .color = Vec3.new(1.0, 0.0, 0.0), .tex_coord = Vec2.new(1.0, 0.0) },
         Vertex{ .pos = Vec3.new(0.5, -0.5, -0.5), .color = Vec3.new(0.0, 1.0, 0.0), .tex_coord = Vec2.new(0.0, 0.0) },
-        Vertex{ .pos = Vec3.new(0.5, 0.5, -0.5), .color = Vec3.new(0.0, 0.0, 1.0), .tex_coord = Vec2.new(0.0, 1.0) },
-        Vertex{ .pos = Vec3.new(-0.5, 0.5, -0.5), .color = Vec3.new(1.0, 1.0, 1.0), .tex_coord = Vec2.new(1.0, 1.0) },
+        Vertex{ .pos = Vec3.new(0.5, -0.5, 0.5), .color = Vec3.new(0.0, 0.0, 1.0), .tex_coord = Vec2.new(0.0, 1.0) },
+        Vertex{ .pos = Vec3.new(-0.5, -0.5, 0.5), .color = Vec3.new(1.0, 1.0, 1.0), .tex_coord = Vec2.new(1.0, 1.0) },
     },
 
     indices: []const u16 = &[_]u16{
@@ -923,7 +925,8 @@ const VulkanApplication = struct {
             .rasterizer_discard_enable = vk.FALSE,
             .polygon_mode = .fill,
             .line_width = 1.0,
-            .cull_mode = .{ .back_bit = true },
+            // Modified
+            .cull_mode = .{ .front_bit = true },
             .front_face = .counter_clockwise,
             .depth_bias_enable = vk.FALSE,
             .depth_bias_constant_factor = 0.0,
@@ -959,6 +962,7 @@ const VulkanApplication = struct {
         const depth_stencil = vk.PipelineDepthStencilStateCreateInfo{
             .depth_test_enable = vk.TRUE,
             .depth_write_enable = vk.TRUE,
+            // We use greater becuase of reversed Z buffer
             .depth_compare_op = .greater,
             .depth_bounds_test_enable = vk.FALSE,
             .min_depth_bounds = 0.0,
@@ -1707,6 +1711,7 @@ const VulkanApplication = struct {
         const clear_values = [_]vk.ClearValue{
             .{ .color = .{ .float_32 = [4]f32{ 0.0, 0.0, 0.0, 1.0 } } },
             .{ .depth_stencil = .{
+                // We use 0.0 becuase of reversed Z buffer
                 .depth = 0.0,
                 .stencil = 0,
                 }
@@ -1889,13 +1894,17 @@ const VulkanApplication = struct {
         const time = @as(f32, @floatFromInt(current_time - start_time)) / std.time.ns_per_s;
 
         const ubo = UniformBufferObject{
-            .model = Mat4.fromRotation(time * 90.0, Vec3.new(0.0, 0.0, 1.0)),
+            // Changed for Y up
+            .model = Mat4.fromRotation(time * 90.0, Vec3.new(0.0, 1.0, 0.0)),
             .view = za.lookAt(
                 Vec3.new(2.0, 2.0, 2.0),
                 Vec3.new(0.0, 0.0, 0.0),
-                Vec3.new(0.0, 0.0, 1.0),
+                // Changed for Y up
+                Vec3.new(0.0, 1.0, 0.0),
             ),
-            .proj = perspectiveVulkan(
+            // This is different from tutorial
+            // Check function definition for more info
+            .proj = perspectiveMatrix(
                 45.0,
                 @as(f32, @floatFromInt(self.swapchain_extent.width)) / @as(f32, @floatFromInt(self.swapchain_extent.height)),
                 0.1,
