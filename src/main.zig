@@ -120,7 +120,7 @@ pub fn perspectiveVulkan(fovy_in_degrees: f32, aspect_ratio: f32, z_near: f32, z
 }
 
 const VulkanApplication = struct {
-    const Self = *@This();
+    const Self = @This();
 
     app_name: [:0]const u8 = "Vulkan Tutorial",
     allocator: Allocator = undefined,
@@ -185,8 +185,12 @@ const VulkanApplication = struct {
     descriptor_pool: vk.DescriptorPool = undefined,
     descriptor_sets: []vk.DescriptorSet = undefined,
 
+    depth_image: vk.Image = undefined,
+    depth_image_memory: vk.DeviceMemory = undefined,
+    depth_image_view: vk.ImageView = undefined,
+
     vertices: []const Vertex = &[_]Vertex{
-        Vertex{ .pos = Vec3.new(-0.5, -0.5, -0.0), .color = Vec3.new(1.0, 0.0, 0.0), .tex_coord = Vec2.new(1.0, 0.0) },
+        Vertex{ .pos = Vec3.new(-0.5, -0.5, 0.0), .color = Vec3.new(1.0, 0.0, 0.0), .tex_coord = Vec2.new(1.0, 0.0) },
         Vertex{ .pos = Vec3.new(0.5, -0.5, 0.0), .color = Vec3.new(0.0, 1.0, 0.0), .tex_coord = Vec2.new(0.0, 0.0) },
         Vertex{ .pos = Vec3.new(0.5, 0.5, 0.0), .color = Vec3.new(0.0, 0.0, 1.0), .tex_coord = Vec2.new(0.0, 1.0) },
         Vertex{ .pos = Vec3.new(-0.5, 0.5, 0.0), .color = Vec3.new(1.0, 1.0, 1.0), .tex_coord = Vec2.new(1.0, 1.0) },
@@ -209,13 +213,13 @@ const VulkanApplication = struct {
         };
     }
 
-    pub fn run(self: Self) !void {
+    pub fn run(self: *Self) !void {
         try self.initWindow();
         try self.initVulkan();
         try self.mainLoop();
     }
 
-    fn initVulkan(self: Self) !void {
+    fn initVulkan(self: *Self) !void {
         try self.getRequiredExtensions();
         try self.createInstance();
         if (debug_mode) try self.setupDebugMessenger();
@@ -227,8 +231,9 @@ const VulkanApplication = struct {
         try self.createRenderPass();
         try self.createDescriptorSetLayout();
         try self.createGraphicsPipeline();
-        try self.createFramebuffers();
         try self.createCommandPool();
+        try self.createDepthResources();
+        try self.createFramebuffers();
         try self.createTextureImage();
         try self.createTextureImageView();
         try self.createTextureSampler();
@@ -241,7 +246,7 @@ const VulkanApplication = struct {
         try self.createSyncObjects();
     }
 
-    pub fn deinit(self: Self) void {
+    pub fn deinit(self: *Self) void {
         self.cleanupSwapchain();
 
         self.vkd.destroySampler(self.device, self.texture_sampler, null);
@@ -293,7 +298,7 @@ const VulkanApplication = struct {
         self.instance_extensions.deinit();
     }
 
-    fn mainLoop(self: Self) !void {
+    fn mainLoop(self: *Self) !void {
         while (!glfw.windowShouldClose(self.window)) {
             while (glfw.getWindowAttribute(self.window, glfw.Window.Attribute.iconified)) {
                 if (glfw.windowShouldClose(self.window)) break;
@@ -307,7 +312,7 @@ const VulkanApplication = struct {
         try self.vkd.deviceWaitIdle(self.device);
     }
 
-    fn initWindow(self: Self) !void {
+    fn initWindow(self: *Self) !void {
         try glfw.init();
         std.log.debug("Initialized GLFW", .{});
 
@@ -330,7 +335,7 @@ const VulkanApplication = struct {
         }
     }
 
-    fn getRequiredExtensions(self: Self) !void {
+    fn getRequiredExtensions(self: *Self) !void {
         var glfw_extensions: [][*:0]const u8 = undefined;
         glfw_extensions = try glfw.getRequiredInstanceExtensions();
 
@@ -341,7 +346,7 @@ const VulkanApplication = struct {
         self.instance_extensions = extensions;
     }
 
-    fn createInstance(self: Self) !void {
+    fn createInstance(self: *Self) !void {
         self.vkb = try BaseDispatch.load(vk_ctx.glfwGetInstanceProcAddress);
 
         if (self.enable_validation_layers) {
@@ -371,7 +376,7 @@ const VulkanApplication = struct {
         self.vki = try InstanceDispatch.load(self.instance, self.vkb.dispatch.vkGetInstanceProcAddr);
     }
 
-    fn setupDebugMessenger(self: Self) !void {
+    fn setupDebugMessenger(self: *Self) !void {
         if (debug_mode) {
             const create_info = vk.DebugUtilsMessengerCreateInfoEXT{
                 .message_severity = .{ .verbose_bit_ext = true, .error_bit_ext = true, .warning_bit_ext = true },
@@ -383,12 +388,12 @@ const VulkanApplication = struct {
         }
     }
 
-    fn createSurface(self: Self) !void {
+    fn createSurface(self: *Self) !void {
         const result = vk_ctx.glfwCreateWindowSurface(self.instance, self.window, null, &self.surface);
         try VkAssert.withMessage(result, "Failed to create window surface!");
     }
 
-    fn checkValidationLayerSupport(self: Self) !bool {
+    fn checkValidationLayerSupport(self: *Self) !bool {
         var layer_count: u32 = 0;
         var result = try self.vkb.enumerateInstanceLayerProperties(&layer_count, null);
         try VkAssert.withMessage(result, "Failed to enumerate instance layer properties.");
@@ -431,7 +436,7 @@ const VulkanApplication = struct {
         return true;
     }
 
-    fn pickPhysicalDevice(self: Self) !void {
+    fn pickPhysicalDevice(self: *Self) !void {
         var device_count: u32 = 0;
         var result = try self.vki.enumeratePhysicalDevices(self.instance, &device_count, null);
         try VkAssert.withMessage(result, "Failed to find a GPU with Vulkan support.");
@@ -457,7 +462,7 @@ const VulkanApplication = struct {
         }
     }
 
-    fn isDeviceSuitable(self: Self, device: vk.PhysicalDevice) !bool {
+    fn isDeviceSuitable(self: *Self, device: vk.PhysicalDevice) !bool {
         const indices: QueueFamilyIndices = try self.findQueueFamilies(device);
 
         const extensions_supported: bool = try self.checkDeviceExtensionSupport(device);
@@ -479,7 +484,7 @@ const VulkanApplication = struct {
         );
     }
 
-    fn findQueueFamilies(self: Self, device: vk.PhysicalDevice) !QueueFamilyIndices {
+    fn findQueueFamilies(self: *Self, device: vk.PhysicalDevice) !QueueFamilyIndices {
         var indices: QueueFamilyIndices = .{};
 
         var queue_family_count: u32 = 0;
@@ -505,7 +510,7 @@ const VulkanApplication = struct {
         return indices;
     }
 
-    fn checkDeviceExtensionSupport(self: Self, device: vk.PhysicalDevice) !bool {
+    fn checkDeviceExtensionSupport(self: *Self, device: vk.PhysicalDevice) !bool {
         var extension_count: u32 = 0;
         var result = try self.vki.enumerateDeviceExtensionProperties(device, null, &extension_count, null);
         try VkAssert.basic(result);
@@ -537,7 +542,7 @@ const VulkanApplication = struct {
         return true;
     }
 
-    fn querySwapChainSupport(self: Self, device: vk.PhysicalDevice) !SwapChainSupportDetails {
+    fn querySwapChainSupport(self: *Self, device: vk.PhysicalDevice) !SwapChainSupportDetails {
         var details = try SwapChainSupportDetails.init(self.allocator);
 
         details.capabilities = try self.vki.getPhysicalDeviceSurfaceCapabilitiesKHR(device, self.surface);
@@ -565,7 +570,7 @@ const VulkanApplication = struct {
         return details;
     }
 
-    fn createLogicalDevice(self: Self) !void {
+    fn createLogicalDevice(self: *Self) !void {
         const indices: QueueFamilyIndices = try self.findQueueFamilies(self.physical_device);
 
         var unique_queue_families = std.ArrayList(u32).init(self.allocator);
@@ -616,7 +621,11 @@ const VulkanApplication = struct {
         std.log.debug("Created logical device", .{});
     }
 
-    fn cleanupSwapchain(self: Self) void {
+    fn cleanupSwapchain(self: *Self) void {
+        self.vkd.destroyImageView(self.device, self.depth_image_view, null);
+        self.vkd.destroyImage(self.device, self.depth_image, null);
+        self.vkd.freeMemory(self.device, self.depth_image_memory, null);
+
         for (self.swapchain_framebuffers) |framebuffer| {
             self.vkd.destroyFramebuffer(self.device, framebuffer, null);
         }
@@ -628,7 +637,7 @@ const VulkanApplication = struct {
         self.vkd.destroySwapchainKHR(self.device, self.swapchain, null);
     }
 
-    fn recreateSwapchain(self: Self) !void {
+    fn recreateSwapchain(self: *Self) !void {
         std.log.debug("Recreating swapchain", .{});
 
         try self.vkd.deviceWaitIdle(self.device);
@@ -637,10 +646,11 @@ const VulkanApplication = struct {
 
         try self.createSwapChain();
         try self.createImageViews();
+        try self.createDepthResources();
         try self.createFramebuffers();
     }
 
-    fn createSwapChain(self: Self) !void {
+    fn createSwapChain(self: *Self) !void {
         var swap_chain_support: SwapChainSupportDetails = try self.querySwapChainSupport(self.physical_device);
         defer swap_chain_support.deinit();
 
@@ -717,7 +727,7 @@ const VulkanApplication = struct {
         return .fifo_khr;
     }
 
-    fn chooseSwapExtent(self: Self, capabilities: *vk.SurfaceCapabilitiesKHR) vk.Extent2D {
+    fn chooseSwapExtent(self: *Self, capabilities: *vk.SurfaceCapabilitiesKHR) vk.Extent2D {
         if (capabilities.current_extent.width != std.math.maxInt(u32)) {
             return capabilities.current_extent;
         } else {
@@ -735,16 +745,20 @@ const VulkanApplication = struct {
         }
     }
 
-    fn createImageViews(self: Self) !void {
+    fn createImageViews(self: *Self) !void {
         self.swapchain_image_views = try self.allocator.alloc(vk.ImageView, self.swapchain_images.len);
 
         for (self.swapchain_images, 0..) |image, i| {
-            self.swapchain_image_views[i] = try self.createImageView(image, self.swapchain_image_format);
+            self.swapchain_image_views[i] = try self.createImageView(
+                image,
+                self.swapchain_image_format,
+                .{ .color_bit = true },
+            );
         }
         std.log.debug("Created image views", .{});
     }
 
-    fn createRenderPass(self: Self) !void {
+    fn createRenderPass(self: *Self) !void {
         const color_attachment = vk.AttachmentDescription{
             .format = self.swapchain_image_format,
             .samples = .{ .@"1_bit" = true },
@@ -761,24 +775,55 @@ const VulkanApplication = struct {
             .layout = .color_attachment_optimal,
         };
 
+        const depth_attachment = vk.AttachmentDescription{
+            .format = try self.findDepthFormat(),
+            .samples = .{ .@"1_bit" = true },
+            .load_op = .clear,
+            .store_op = .dont_care,
+            .stencil_load_op = .dont_care,
+            .stencil_store_op = .dont_care,
+            .initial_layout = .undefined,
+            .final_layout = .depth_stencil_attachment_optimal,
+        };
+
+        const depth_attachment_ref = vk.AttachmentReference{
+            .attachment = 1,
+            .layout = .depth_stencil_attachment_optimal,
+        };
+
         const subpass = vk.SubpassDescription{
             .pipeline_bind_point = .graphics,
             .color_attachment_count = 1,
             .p_color_attachments = @ptrCast(&color_attachment_ref),
+            .p_depth_stencil_attachment = &depth_attachment_ref,
         };
 
         const dependency = vk.SubpassDependency{
             .src_subpass = vk.SUBPASS_EXTERNAL,
             .dst_subpass = 0,
-            .src_stage_mask = .{ .color_attachment_output_bit = true },
+            .src_stage_mask = .{
+                .color_attachment_output_bit = true,
+                .early_fragment_tests_bit = true,
+            },
             .src_access_mask = .{},
-            .dst_stage_mask = .{ .color_attachment_output_bit = true },
-            .dst_access_mask = .{ .color_attachment_write_bit = true },
+            .dst_stage_mask = .{
+                .color_attachment_output_bit = true,
+                .early_fragment_tests_bit = true,
+            },
+            .dst_access_mask = .{
+                .color_attachment_write_bit = true,
+                .depth_stencil_attachment_write_bit = true,
+            },
+        };
+
+        const attachments = [_]vk.AttachmentDescription{
+            color_attachment,
+            depth_attachment,
         };
 
         const render_pass_info = vk.RenderPassCreateInfo{
-            .attachment_count = 1,
-            .p_attachments = @ptrCast(&color_attachment),
+            .attachment_count = attachments.len,
+            .p_attachments = &attachments,
             .subpass_count = 1,
             .p_subpasses = @ptrCast(&subpass),
             .dependency_count = 1,
@@ -789,7 +834,7 @@ const VulkanApplication = struct {
         std.log.debug("Created render pass", .{});
     }
 
-    fn createDescriptorSetLayout(self: Self) !void {
+    fn createDescriptorSetLayout(self: *Self) !void {
         const ubo_layout_binding = vk.DescriptorSetLayoutBinding{
             .binding = 0,
             .descriptor_type = .uniform_buffer,
@@ -819,7 +864,7 @@ const VulkanApplication = struct {
         self.descriptor_set_layout = try self.vkd.createDescriptorSetLayout(self.device, &layout_info, null);
     }
 
-    fn createGraphicsPipeline(self: Self) !void {
+    fn createGraphicsPipeline(self: *Self) !void {
         const vert_file align(@alignOf(u32)) = @embedFile("shaders/vert.spv").*;
         const frag_file align(@alignOf(u32)) = @embedFile("shaders/frag.spv").*;
 
@@ -911,6 +956,18 @@ const VulkanApplication = struct {
             .alpha_blend_op = .add,
         };
 
+        const depth_stencil = vk.PipelineDepthStencilStateCreateInfo{
+            .depth_test_enable = vk.TRUE,
+            .depth_write_enable = vk.TRUE,
+            .depth_compare_op = .greater,
+            .depth_bounds_test_enable = vk.FALSE,
+            .min_depth_bounds = 0.0,
+            .max_depth_bounds = 1.0,
+            .stencil_test_enable = vk.FALSE,
+            .front = undefined,
+            .back = undefined,
+        };
+
         const color_blending = vk.PipelineColorBlendStateCreateInfo{
             .logic_op_enable = vk.FALSE,
             .logic_op = .copy,
@@ -942,7 +999,7 @@ const VulkanApplication = struct {
             .p_viewport_state = &viewport_state,
             .p_rasterization_state = &rasterizer,
             .p_multisample_state = &multisampling,
-            .p_depth_stencil_state = null,
+            .p_depth_stencil_state = &depth_stencil,
             .p_color_blend_state = &color_blending,
             .p_dynamic_state = &dynamic_state,
             .layout = self.pipeline_layout,
@@ -965,7 +1022,7 @@ const VulkanApplication = struct {
         std.log.debug("Created graphics pipeline", .{});
     }
 
-    fn createShaderModule(self: Self, code: []const u8) !vk.ShaderModule {
+    fn createShaderModule(self: *Self, code: []const u8) !vk.ShaderModule {
         const create_info = vk.ShaderModuleCreateInfo{
             .code_size = code.len,
             .p_code = @ptrCast(@alignCast(code.ptr)),
@@ -973,18 +1030,19 @@ const VulkanApplication = struct {
         return try self.vkd.createShaderModule(self.device, &create_info, null);
     }
 
-    fn createFramebuffers(self: Self) !void {
+    fn createFramebuffers(self: *Self) !void {
         self.swapchain_framebuffers = try self.allocator.alloc(vk.Framebuffer, self.swapchain_image_views.len);
         errdefer self.allocator.free(self.swapchain_framebuffers);
 
         for (self.swapchain_image_views, 0..) |image_view, i| {
             const attachments = [_]vk.ImageView{
                 image_view,
+                self.depth_image_view,
             };
 
             const framebuffer_info = vk.FramebufferCreateInfo{
                 .render_pass = self.render_pass,
-                .attachment_count = 1,
+                .attachment_count = attachments.len,
                 .p_attachments = &attachments,
                 .width = self.swapchain_extent.width,
                 .height = self.swapchain_extent.height,
@@ -996,7 +1054,7 @@ const VulkanApplication = struct {
         std.log.debug("Created framebuffers", .{});
     }
 
-    fn createCommandPool(self: Self) !void {
+    fn createCommandPool(self: *Self) !void {
         const queue_family_indices = try self.findQueueFamilies(self.physical_device);
 
         const pool_info = vk.CommandPoolCreateInfo{
@@ -1008,7 +1066,70 @@ const VulkanApplication = struct {
         std.log.debug("Created command pool", .{});
     }
 
-    fn createTextureImage(self: Self) !void {
+    fn createDepthResources(self: *Self) !void {
+        const depth_format = try self.findDepthFormat();
+
+        try self.createImage(
+            self.swapchain_extent.width,
+            self.swapchain_extent.height,
+            depth_format,
+            .optimal,
+            .{ .depth_stencil_attachment_bit = true },
+            .{ .device_local_bit = true },
+            &self.depth_image,
+            &self.depth_image_memory,
+        );
+
+        self.depth_image_view = try self.createImageView(
+            self.depth_image,
+            depth_format,
+            .{ .depth_bit = true },
+        );
+
+        try self.transitionImageLayout(
+            self.depth_image,
+            depth_format,
+            .undefined,
+            .depth_stencil_attachment_optimal,
+        );
+    }
+
+    fn findSupportedFormat(
+        self: *Self,
+        candidates: []const vk.Format,
+        tiling: vk.ImageTiling,
+        features: vk.FormatFeatureFlags
+    ) !vk.Format {
+        for (candidates) |format| {
+            const props = self.vki.getPhysicalDeviceFormatProperties(self.physical_device, format);
+
+            if (tiling == .linear and props.linear_tiling_features.contains(features)) {
+                return format;
+            } else if (tiling == .optimal and props.optimal_tiling_features.contains(features)) {
+                return format;
+            }
+        }
+
+        return error.NoSupportedFormatFound;
+    }
+
+    fn findDepthFormat(self: *Self) !vk.Format {
+        return try self.findSupportedFormat(
+            &[_]vk.Format{
+                .d32_sfloat,
+                .d32_sfloat_s8_uint,
+                .d24_unorm_s8_uint,
+            },
+            .optimal,
+            .{ .depth_stencil_attachment_bit = true },
+        );
+    }
+
+    fn hasStencilComponent(format: vk.Format) bool {
+        return format == .d32_sfloat_s8_uint or format == .d24_unorm_s8_uint;
+    }
+
+    fn createTextureImage(self: *Self) !void {
         var image = try zigimg.Image.fromFilePath(self.allocator, "resources/color_star.png");
         try image.convert(.rgba32);
         defer image.deinit();
@@ -1072,13 +1193,17 @@ const VulkanApplication = struct {
         self.vkd.freeMemory(self.device, staging_buffer_memory, null);
     }
 
-    fn createTextureImageView(self: Self) !void {
-        self.texture_image_view = try self.createImageView(self.texture_image, .r8g8b8a8_srgb);
+    fn createTextureImageView(self: *Self) !void {
+        self.texture_image_view = try self.createImageView(
+            self.texture_image,
+            .r8g8b8a8_srgb,
+            .{ .color_bit = true },
+        );
 
         std.log.debug("Created texture view", .{});
     }
 
-    fn createTextureSampler(self: Self) !void {
+    fn createTextureSampler(self: *Self) !void {
         const sampler_info = vk.SamplerCreateInfo{
             .mag_filter = .linear,
             .min_filter = .linear,
@@ -1101,7 +1226,7 @@ const VulkanApplication = struct {
     }
 
     fn createImage(
-        self: Self,
+        self: *Self,
         width: u32,
         height: u32,
         format: vk.Format,
@@ -1152,7 +1277,12 @@ const VulkanApplication = struct {
         try self.vkd.bindImageMemory(self.device, image.*, image_memory.*, 0);
     }
 
-    fn createImageView(self: Self, image: vk.Image, format: vk.Format) !vk.ImageView {
+    fn createImageView(
+        self: *Self,
+        image: vk.Image,
+        format: vk.Format,
+        aspect_flags: vk.ImageAspectFlags
+    ) !vk.ImageView {
         const view_info = vk.ImageViewCreateInfo{
             .image = image,
             .view_type = .@"2d",
@@ -1164,7 +1294,7 @@ const VulkanApplication = struct {
                 .a = .identity,
             },
             .subresource_range = .{
-                .aspect_mask = .{ .color_bit = true },
+                .aspect_mask = aspect_flags,
                 .base_mip_level = 0,
                 .level_count = 1,
                 .base_array_layer = 0,
@@ -1176,9 +1306,9 @@ const VulkanApplication = struct {
     }
 
     fn transitionImageLayout(
-        self: Self,
+        self: *Self,
         image: vk.Image,
-        _: vk.Format,
+        format: vk.Format,
         old_layout: vk.ImageLayout,
         new_layout: vk.ImageLayout,
     ) !void {
@@ -1201,6 +1331,16 @@ const VulkanApplication = struct {
             .dst_access_mask = .{},
         };
 
+        if (new_layout == .depth_stencil_attachment_optimal) {
+            barrier.subresource_range.aspect_mask = .{ .depth_bit = true };
+
+            if (hasStencilComponent(format)) {
+                barrier.subresource_range.aspect_mask.stencil_bit = true;
+            }
+        } else {
+            barrier.subresource_range.aspect_mask = .{ .color_bit = true };
+        }
+
         var source_stage: vk.PipelineStageFlags = undefined;
         var destination_stage: vk.PipelineStageFlags = undefined;
 
@@ -1216,6 +1356,14 @@ const VulkanApplication = struct {
 
             source_stage = .{ .transfer_bit = true };
             destination_stage = .{ .fragment_shader_bit = true };
+        } else if (old_layout == .undefined and new_layout == .depth_stencil_attachment_optimal) {
+            barrier.src_access_mask = .{};
+            barrier.dst_access_mask = .{
+                .depth_stencil_attachment_read_bit = true,
+                .depth_stencil_attachment_write_bit = true,
+            };
+            source_stage = .{ .top_of_pipe_bit = true };
+            destination_stage = .{ .early_fragment_tests_bit = true };
         } else {
             std.log.err("Unsupported layout transition", .{});
             return error.UnsupportedLayoutTransition;
@@ -1234,7 +1382,7 @@ const VulkanApplication = struct {
     }
 
     fn copyBufferToImage(
-        self: Self,
+        self: *Self,
         buffer: vk.Buffer,
         image: vk.Image,
         width: u32,
@@ -1268,7 +1416,7 @@ const VulkanApplication = struct {
         try self.endSingleTimeCommands(command_buffer);
     }
 
-    fn createVertexBuffer(self: Self) !void {
+    fn createVertexBuffer(self: *Self) !void {
         const buffer_size: vk.DeviceSize = @sizeOf(Vertex) * self.vertices.len;
 
         var staging_buffer: vk.Buffer = undefined;
@@ -1305,7 +1453,7 @@ const VulkanApplication = struct {
         std.log.debug("Created vertex buffer", .{});
     }
 
-    fn createIndexBuffer(self: Self) !void {
+    fn createIndexBuffer(self: *Self) !void {
         const buffer_size: vk.DeviceSize = @sizeOf(u16) * self.indices.len;
 
         var staging_buffer: vk.Buffer = undefined;
@@ -1342,7 +1490,7 @@ const VulkanApplication = struct {
         std.log.debug("Created index buffer", .{});
     }
 
-    fn createBuffer(self: Self, size: vk.DeviceSize, usage: vk.BufferUsageFlags, properties: vk.MemoryPropertyFlags, buffer: *vk.Buffer, buffer_memory: *vk.DeviceMemory) !void {
+    fn createBuffer(self: *Self, size: vk.DeviceSize, usage: vk.BufferUsageFlags, properties: vk.MemoryPropertyFlags, buffer: *vk.Buffer, buffer_memory: *vk.DeviceMemory) !void {
         const buffer_info = vk.BufferCreateInfo{
             .size = size,
             .usage = usage,
@@ -1362,7 +1510,7 @@ const VulkanApplication = struct {
         try self.vkd.bindBufferMemory(self.device, buffer.*, buffer_memory.*, 0);
     }
 
-    fn beginSingleTimeCommands(self: Self) !vk.CommandBuffer {
+    fn beginSingleTimeCommands(self: *Self) !vk.CommandBuffer {
         const alloc_info = vk.CommandBufferAllocateInfo{
             .level = .primary,
             .command_pool = self.command_pool,
@@ -1380,7 +1528,7 @@ const VulkanApplication = struct {
         return command_buffer;
     }
 
-    fn endSingleTimeCommands(self: Self, command_buffer: vk.CommandBuffer) !void {
+    fn endSingleTimeCommands(self: *Self, command_buffer: vk.CommandBuffer) !void {
         try self.vkd.endCommandBuffer(command_buffer);
 
         const submit_info = vk.SubmitInfo{
@@ -1394,7 +1542,7 @@ const VulkanApplication = struct {
         self.vkd.freeCommandBuffers(self.device, self.command_pool, 1, @ptrCast(&command_buffer));
     }
 
-    fn copyBuffer(self: Self, src_buffer: vk.Buffer, dst_buffer: vk.Buffer, size: vk.DeviceSize) !void {
+    fn copyBuffer(self: *Self, src_buffer: vk.Buffer, dst_buffer: vk.Buffer, size: vk.DeviceSize) !void {
         const command_buffer = try self.beginSingleTimeCommands();
 
         const copy_region = vk.BufferCopy{
@@ -1407,21 +1555,21 @@ const VulkanApplication = struct {
         try self.endSingleTimeCommands(command_buffer);
     }
 
-    fn findMemoryType(self: Self, type_filter: u32, properties: vk.MemoryPropertyFlags) !u32 {
+    fn findMemoryType(self: *Self, type_filter: u32, properties: vk.MemoryPropertyFlags) !u32 {
         const mem_properties = self.vki.getPhysicalDeviceMemoryProperties(self.physical_device);
 
         for (0..mem_properties.memory_type_count) |i| {
             if (
             // Some evil magic to make compiler happy
-            (type_filter & (@as(u64, 1) << @intCast(i)) != 0)
-            and (vk.MemoryPropertyFlags.intersect(mem_properties.memory_types[i].property_flags, properties) == properties)) {
+            (type_filter & (@as(usize, 1) << @intCast(i)) != 0)
+            and mem_properties.memory_types[i].property_flags.contains(properties)) {
                 return @intCast(i);
             }
         }
         return error.NoSuitableMemoryType;
     }
 
-    fn createUniformBuffers(self: Self) !void {
+    fn createUniformBuffers(self: *Self) !void {
         const buffer_size: vk.DeviceSize = @sizeOf(UniformBufferObject);
 
         self.uniform_buffers = try self.allocator.alloc(vk.Buffer, self.max_frames_in_flight);
@@ -1446,7 +1594,7 @@ const VulkanApplication = struct {
         std.log.debug("Created uniform buffers", .{});
     }
 
-    fn createDescriptorPool(self: Self) !void {
+    fn createDescriptorPool(self: *Self) !void {
         const pool_sizes = [_]vk.DescriptorPoolSize{
             .{
                 .type = .uniform_buffer,
@@ -1468,7 +1616,7 @@ const VulkanApplication = struct {
         std.log.debug("Created descriptor pool", .{});
     }
 
-    fn createDescriptorSets(self: Self) !void {
+    fn createDescriptorSets(self: *Self) !void {
         const layouts = try self.allocator.alloc(vk.DescriptorSetLayout, self.max_frames_in_flight);
         defer self.allocator.free(layouts);
 
@@ -1534,7 +1682,7 @@ const VulkanApplication = struct {
         std.log.debug("Created descriptor sets", .{});
     }
 
-    fn createCommandBuffers(self: Self) !void {
+    fn createCommandBuffers(self: *Self) !void {
         const alloc_info = vk.CommandBufferAllocateInfo{
             .command_pool = self.command_pool,
             .level = .primary,
@@ -1548,7 +1696,7 @@ const VulkanApplication = struct {
         std.log.debug("Created command buffers", .{});
     }
 
-    fn recordCommandBuffer(self: Self, command_buffer: vk.CommandBuffer, image_index: u32) !void {
+    fn recordCommandBuffer(self: *Self, command_buffer: vk.CommandBuffer, image_index: u32) !void {
         const begin_info = vk.CommandBufferBeginInfo{
             .flags = .{},
             .p_inheritance_info = null,
@@ -1556,7 +1704,14 @@ const VulkanApplication = struct {
 
         try self.vkd.beginCommandBuffer(command_buffer, &begin_info);
 
-        const clear_color = vk.ClearValue{ .color = .{ .float_32 = [4]f32{ 0.0, 0.0, 0.0, 1.0 } } };
+        const clear_values = [_]vk.ClearValue{
+            .{ .color = .{ .float_32 = [4]f32{ 0.0, 0.0, 0.0, 1.0 } } },
+            .{ .depth_stencil = .{
+                .depth = 0.0,
+                .stencil = 0,
+                }
+            },
+        };
 
         const render_pass_info = vk.RenderPassBeginInfo{
             .render_pass = self.render_pass,
@@ -1565,8 +1720,8 @@ const VulkanApplication = struct {
                 .offset = .{ .x = 0, .y = 0 },
                 .extent = self.swapchain_extent,
             },
-            .clear_value_count = 1,
-            .p_clear_values = @ptrCast(&clear_color),
+            .clear_value_count = clear_values.len,
+            .p_clear_values = &clear_values,
         };
 
         self.vkd.cmdBeginRenderPass(command_buffer, &render_pass_info, .@"inline");
@@ -1613,7 +1768,7 @@ const VulkanApplication = struct {
         try self.vkd.endCommandBuffer(command_buffer);
     }
 
-    fn createSyncObjects(self: Self) !void {
+    fn createSyncObjects(self: *Self) !void {
         const sempahore_info = vk.SemaphoreCreateInfo{};
 
         const fence_info = vk.FenceCreateInfo{
@@ -1641,7 +1796,7 @@ const VulkanApplication = struct {
         std.log.debug("Created sync objects", .{});
     }
 
-    fn drawFrame(self: Self) !void {
+    fn drawFrame(self: *Self) !void {
         defer self.current_frame = (self.current_frame + 1) % self.max_frames_in_flight;
 
         var result = try self.vkd.waitForFences(self.device, 1, @ptrCast(&self.in_flight_fences[self.current_frame]), vk.TRUE, std.math.maxInt(u64));
@@ -1729,7 +1884,7 @@ const VulkanApplication = struct {
         }
     }
 
-    fn updateUniformBuffer(self: Self, current_image: u32) !void {
+    fn updateUniformBuffer(self: *Self, current_image: u32) !void {
         const current_time = std.time.nanoTimestamp();
         const time = @as(f32, @floatFromInt(current_time - start_time)) / std.time.ns_per_s;
 

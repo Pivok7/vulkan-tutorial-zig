@@ -49,6 +49,7 @@ const apis: []const vk.ApiInfo = &.{
             .getPhysicalDeviceSurfacePresentModesKHR = true,
             .getPhysicalDeviceMemoryProperties = true,
             .getPhysicalDeviceFeatures = true,
+            .getPhysicalDeviceFormatProperties = true,
         },
         .device_commands = .{
             .getDeviceQueue = true,
