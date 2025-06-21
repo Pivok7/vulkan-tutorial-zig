@@ -53,7 +53,7 @@ const SwapChainSupportDetails = struct {
 };
 
 const HelloTriangleApplication = struct {
-    const Self = *@This();
+    const Self = @This();
 
     app_name: [:0]const u8 = "Hello Triangle",
     allocator: Allocator = undefined,
@@ -107,13 +107,13 @@ const HelloTriangleApplication = struct {
         };
     }
 
-    pub fn run(self: Self) !void {
+    pub fn run(self: *Self) !void {
         try self.initWindow();
         try self.initVulkan();
         try self.mainLoop();
     }
 
-    fn initVulkan(self: Self) !void {
+    fn initVulkan(self: *Self) !void {
         try self.getRequiredExtensions();
         try self.createInstance();
         if (debug_mode) try self.setupDebugMessenger();
@@ -130,7 +130,7 @@ const HelloTriangleApplication = struct {
         try self.createSyncObjects();
     }
 
-    pub fn deinit(self: Self) void {
+    pub fn deinit(self: *Self) void {
         for (0..self.max_frames_in_flight) |i| {
             self.vkd.destroyFence(self.device, self.in_flight_fences[i], null);
             self.vkd.destroySemaphore(self.device, self.image_available_semaphores[i], null);
@@ -165,7 +165,7 @@ const HelloTriangleApplication = struct {
         self.instance_extensions.deinit();
     }
 
-    fn mainLoop(self: Self) !void {
+    fn mainLoop(self: *Self) !void {
         while (!glfw.windowShouldClose(self.window)) {
             while (glfw.getWindowAttribute(self.window, glfw.Window.Attribute.iconified)) {
                 if (glfw.windowShouldClose(self.window)) break;
@@ -179,7 +179,7 @@ const HelloTriangleApplication = struct {
         try self.vkd.deviceWaitIdle(self.device);
     }
 
-    fn initWindow(self: Self) !void {
+    fn initWindow(self: *Self) !void {
         try glfw.init();
         std.log.debug("Initialized GLFW", .{});
 
@@ -202,7 +202,7 @@ const HelloTriangleApplication = struct {
         }
     }
 
-    fn getRequiredExtensions(self: Self) !void {
+    fn getRequiredExtensions(self: *Self) !void {
         var glfw_extensions: [][*:0]const u8 = undefined;
         glfw_extensions = try glfw.getRequiredInstanceExtensions();
 
@@ -213,7 +213,7 @@ const HelloTriangleApplication = struct {
         self.instance_extensions = extensions;
     }
 
-    fn createInstance(self: Self) !void {
+    fn createInstance(self: *Self) !void {
         self.vkb = try BaseDispatch.load(vk_ctx.glfwGetInstanceProcAddress);
 
         if (self.enable_validation_layers) {
@@ -243,7 +243,7 @@ const HelloTriangleApplication = struct {
         self.vki = try InstanceDispatch.load(self.instance, self.vkb.dispatch.vkGetInstanceProcAddr);
     }
 
-    fn setupDebugMessenger(self: Self) !void {
+    fn setupDebugMessenger(self: *Self) !void {
         if (debug_mode) {
             const create_info = vk.DebugUtilsMessengerCreateInfoEXT{
                 .message_severity = .{ .verbose_bit_ext = true, .error_bit_ext = true, .warning_bit_ext = true },
@@ -255,12 +255,12 @@ const HelloTriangleApplication = struct {
         }
     }
 
-    fn createSurface(self: Self) !void {
+    fn createSurface(self: *Self) !void {
         const result = vk_ctx.glfwCreateWindowSurface(self.instance, self.window, null, &self.surface);
         try VkAssert.withMessage(result, "Failed to create window surface!");
     }
 
-    fn checkValidationLayerSupport(self: Self) !bool {
+    fn checkValidationLayerSupport(self: *Self) !bool {
         var layer_count: u32 = 0;
         var result = try self.vkb.enumerateInstanceLayerProperties(&layer_count, null);
         try VkAssert.withMessage(result, "Failed to enumerate instance layer properties.");
@@ -303,7 +303,7 @@ const HelloTriangleApplication = struct {
         return true;
     }
 
-    fn pickPhysicalDevice(self: Self) !void {
+    fn pickPhysicalDevice(self: *Self) !void {
         var device_count: u32 = 0;
         var result = try self.vki.enumeratePhysicalDevices(self.instance, &device_count, null);
         try VkAssert.withMessage(result, "Failed to find a GPU with Vulkan support.");
@@ -329,7 +329,7 @@ const HelloTriangleApplication = struct {
         }
     }
 
-    fn isDeviceSuitable(self: Self, device: vk.PhysicalDevice) !bool {
+    fn isDeviceSuitable(self: *Self, device: vk.PhysicalDevice) !bool {
         const indices: QueueFamilyIndices = try self.findQueueFamilies(device);
 
         const extensions_supported: bool = try self.checkDeviceExtensionSupport(device);
@@ -344,7 +344,7 @@ const HelloTriangleApplication = struct {
         return (indices.isComplete() and extensions_supported and swap_chain_adequate);
     }
 
-    fn findQueueFamilies(self: Self, device: vk.PhysicalDevice) !QueueFamilyIndices {
+    fn findQueueFamilies(self: *Self, device: vk.PhysicalDevice) !QueueFamilyIndices {
         var indices: QueueFamilyIndices = .{};
 
         var queue_family_count: u32 = 0;
@@ -370,7 +370,7 @@ const HelloTriangleApplication = struct {
         return indices;
     }
 
-    fn checkDeviceExtensionSupport(self: Self, device: vk.PhysicalDevice) !bool {
+    fn checkDeviceExtensionSupport(self: *Self, device: vk.PhysicalDevice) !bool {
         var extension_count: u32 = 0;
         var result = try self.vki.enumerateDeviceExtensionProperties(device, null, &extension_count, null);
         try VkAssert.basic(result);
@@ -402,7 +402,7 @@ const HelloTriangleApplication = struct {
         return true;
     }
 
-    fn querySwapChainSupport(self: Self, device: vk.PhysicalDevice) !SwapChainSupportDetails {
+    fn querySwapChainSupport(self: *Self, device: vk.PhysicalDevice) !SwapChainSupportDetails {
         var details = try SwapChainSupportDetails.init(self.allocator);
 
         details.capabilities = try self.vki.getPhysicalDeviceSurfaceCapabilitiesKHR(device, self.surface);
@@ -435,7 +435,7 @@ const HelloTriangleApplication = struct {
         return details;
     }
 
-    fn createLogicalDevice(self: Self) !void {
+    fn createLogicalDevice(self: *Self) !void {
         const indices: QueueFamilyIndices = try self.findQueueFamilies(self.physical_device);
 
         var unique_queue_families = std.ArrayList(u32).init(self.allocator);
@@ -484,7 +484,7 @@ const HelloTriangleApplication = struct {
         std.log.debug("Created logical device", .{});
     }
 
-    fn cleanupSwapchain(self: Self) void {
+    fn cleanupSwapchain(self: *Self) void {
         for (self.swapchain_framebuffers) |framebuffer| {
             self.vkd.destroyFramebuffer(self.device, framebuffer, null);
         }
@@ -496,7 +496,7 @@ const HelloTriangleApplication = struct {
         self.vkd.destroySwapchainKHR(self.device, self.swapchain, null);
     }
 
-    fn recreateSwapchain(self: Self) !void {
+    fn recreateSwapchain(self: *Self) !void {
         std.log.debug("Recreating swapchain", .{});
 
         try self.vkd.deviceWaitIdle(self.device);
@@ -508,7 +508,7 @@ const HelloTriangleApplication = struct {
         try self.createFramebuffers();
     }
 
-    fn createSwapChain(self: Self) !void {
+    fn createSwapChain(self: *Self) !void {
         var swap_chain_support: SwapChainSupportDetails = try self.querySwapChainSupport(self.physical_device);
         defer swap_chain_support.deinit();
 
@@ -585,7 +585,7 @@ const HelloTriangleApplication = struct {
         return .fifo_khr;
     }
 
-    fn chooseSwapExtent(self: Self, capabilities: *vk.SurfaceCapabilitiesKHR) vk.Extent2D {
+    fn chooseSwapExtent(self: *Self, capabilities: *vk.SurfaceCapabilitiesKHR) vk.Extent2D {
         if (capabilities.current_extent.width != std.math.maxInt(u32)) {
             return capabilities.current_extent;
         } else {
@@ -603,7 +603,7 @@ const HelloTriangleApplication = struct {
         }
     }
 
-    fn createImageViews(self: Self) !void {
+    fn createImageViews(self: *Self) !void {
         self.swapchain_image_views = try self.allocator.alloc(vk.ImageView, self.swapchain_images.len);
 
         for (self.swapchain_images, 0..) |image, i| {
@@ -632,7 +632,7 @@ const HelloTriangleApplication = struct {
         std.log.debug("Created image views", .{});
     }
 
-    fn createRenderPass(self: Self) !void {
+    fn createRenderPass(self: *Self) !void {
         const color_attachment = vk.AttachmentDescription{
             .format = self.swapchain_image_format,
             .samples = .{ .@"1_bit" = true },
@@ -677,7 +677,7 @@ const HelloTriangleApplication = struct {
         std.log.debug("Created render pass", .{});
     }
 
-    fn createGraphicsPipeline(self: Self) !void {
+    fn createGraphicsPipeline(self: *Self) !void {
         const vert_file align(@alignOf(u32)) = @embedFile("shaders/vert.spv").*;
         const frag_file align(@alignOf(u32)) = @embedFile("shaders/frag.spv").*;
 
@@ -820,7 +820,7 @@ const HelloTriangleApplication = struct {
         std.log.debug("Created graphics pipeline", .{});
     }
 
-    fn createShaderModule(self: Self, code: []const u8) !vk.ShaderModule {
+    fn createShaderModule(self: *Self, code: []const u8) !vk.ShaderModule {
         const create_info = vk.ShaderModuleCreateInfo{
             .code_size = code.len,
             .p_code = @ptrCast(@alignCast(code.ptr)),
@@ -828,7 +828,7 @@ const HelloTriangleApplication = struct {
         return try self.vkd.createShaderModule(self.device, &create_info, null);
     }
 
-    fn createFramebuffers(self: Self) !void {
+    fn createFramebuffers(self: *Self) !void {
         self.swapchain_framebuffers = try self.allocator.alloc(vk.Framebuffer, self.swapchain_image_views.len);
         errdefer self.allocator.free(self.swapchain_framebuffers);
 
@@ -852,7 +852,7 @@ const HelloTriangleApplication = struct {
         std.log.debug("Created framebuffers", .{});
     }
 
-    fn createCommandPool(self: Self) !void {
+    fn createCommandPool(self: *Self) !void {
         const queue_family_indices = try self.findQueueFamilies(self.physical_device);
 
         const pool_info = vk.CommandPoolCreateInfo{
@@ -864,7 +864,7 @@ const HelloTriangleApplication = struct {
         std.log.debug("Created command pool", .{});
     }
 
-    fn createCommandBuffers(self: Self) !void {
+    fn createCommandBuffers(self: *Self) !void {
         const alloc_info = vk.CommandBufferAllocateInfo{
             .command_pool = self.command_pool,
             .level = .primary,
@@ -878,7 +878,7 @@ const HelloTriangleApplication = struct {
         std.log.debug("Created command buffers", .{});
     }
 
-    fn recordCommandBuffer(self: Self, command_buffer: vk.CommandBuffer, image_index: u32) !void {
+    fn recordCommandBuffer(self: *Self, command_buffer: vk.CommandBuffer, image_index: u32) !void {
         const begin_info = vk.CommandBufferBeginInfo{
             .flags = .{},
             .p_inheritance_info = null,
@@ -926,7 +926,7 @@ const HelloTriangleApplication = struct {
         try self.vkd.endCommandBuffer(command_buffer);
     }
 
-    fn createSyncObjects(self: Self) !void {
+    fn createSyncObjects(self: *Self) !void {
         const sempahore_info = vk.SemaphoreCreateInfo{};
 
         const fence_info = vk.FenceCreateInfo{
@@ -954,7 +954,7 @@ const HelloTriangleApplication = struct {
         std.log.debug("Created sync objects", .{});
     }
 
-    fn drawFrame(self: Self) !void {
+    fn drawFrame(self: *Self) !void {
         defer self.current_frame = (self.current_frame + 1) % self.max_frames_in_flight;
 
         var result = try self.vkd.waitForFences(self.device, 1, @ptrCast(&self.in_flight_fences[self.current_frame]), vk.TRUE, std.math.maxInt(u64));
