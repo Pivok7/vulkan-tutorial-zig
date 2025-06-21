@@ -8,7 +8,6 @@ const zigimg = @import("zigimg");
 const obj = @import("obj");
 
 const Allocator = std.mem.Allocator;
-const c_allocator = std.heap.c_allocator;
 
 const VkAssert = vk_ctx.VkAssert;
 const BaseDispatch = vk_ctx.BaseDispatch;
@@ -400,8 +399,8 @@ const VulkanApplication = struct {
         var result = try self.vkb.enumerateInstanceLayerProperties(&layer_count, null);
         try VkAssert.withMessage(result, "Failed to enumerate instance layer properties.");
 
-        const available_layers = try c_allocator.alloc(vk.LayerProperties, layer_count);
-        defer c_allocator.free(available_layers);
+        const available_layers = try self.allocator.alloc(vk.LayerProperties, layer_count);
+        defer self.allocator.free(available_layers);
 
         result = try self.vkb.enumerateInstanceLayerProperties(&layer_count, @ptrCast(available_layers));
         try VkAssert.withMessage(result, "Failed to enumerate instance layer properties.");
