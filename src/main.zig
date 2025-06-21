@@ -283,10 +283,20 @@ const VulkanApplication = struct {
         glfw.terminate();
         std.log.debug("Terminated GLFW", .{});
 
+        self.vertices.deinit();
+        self.indices.deinit();
+
+        self.allocator.free(self.uniform_buffers);
+        self.allocator.free(self.uniform_buffers_mapped);
+        self.allocator.free(self.uniform_buffers_memory);
+
+        self.allocator.free(self.image_available_semaphores);
+        self.allocator.free(self.render_finished_semaphores);
+        self.allocator.free(self.in_flight_fences);
+
         self.allocator.free(self.descriptor_sets);
         self.allocator.free(self.command_buffers);
-        self.allocator.free(self.swapchain_image_views);
-        self.allocator.free(self.swapchain_images);
+
         self.instance_extensions.deinit();
     }
 
@@ -580,6 +590,7 @@ const VulkanApplication = struct {
         }
 
         var queue_create_infos = try self.allocator.alloc(vk.DeviceQueueCreateInfo, unique_queue_families.items.len);
+        defer self.allocator.free(queue_create_infos);
 
         const queue_priority: f32 = 1.0;
         for (unique_queue_families.items, 0..) |queue_family, i| {
@@ -627,6 +638,10 @@ const VulkanApplication = struct {
         }
 
         self.vkd.destroySwapchainKHR(self.device, self.swapchain, null);
+
+        self.allocator.free(self.swapchain_image_views);
+        self.allocator.free(self.swapchain_images);
+        self.allocator.free(self.swapchain_framebuffers);
     }
 
     fn recreateSwapchain(self: *Self) !void {
@@ -1085,6 +1100,8 @@ const VulkanApplication = struct {
             .undefined,
             .depth_stencil_attachment_optimal,
         );
+
+        std.log.debug("Created depth resources", .{});
     }
 
     fn findSupportedFormat(
@@ -1124,8 +1141,8 @@ const VulkanApplication = struct {
 
     fn createTextureImage(self: *Self) !void {
         var image = try zigimg.Image.fromMemory(self.allocator, @embedFile(model_texture_path));
-        try image.convert(.rgba32);
         defer image.deinit();
+        try image.convert(.rgba32);
 
         const image_size: vk.DeviceSize = image.rawBytes().len;
 
@@ -1435,6 +1452,8 @@ const VulkanApplication = struct {
                 try self.indices.append(@intCast(self.indices.items.len));
             }
         }
+
+        std.log.debug("Loaded model", .{});
     }
 
     fn createVertexBuffer(self: *Self) !void {
@@ -1967,9 +1986,13 @@ fn cStringEql(str_1: [*:0]const u8, str_2: [*]const u8) bool {
 }
 
 pub fn main() !void {
+    var dba = std.heap.DebugAllocator(.{}){};
+    defer _ = dba.deinit();
+    const allocator = dba.allocator();
+
     start_time = std.time.nanoTimestamp();
 
-    var app = VulkanApplication.init(c_allocator);
+    var app = VulkanApplication.init(allocator);
     defer app.deinit();
     try app.run();
 }
