@@ -5,7 +5,6 @@ const vk = @import("vulkan");
 const vk_ctx = @import("vk_context.zig");
 
 const Allocator = std.mem.Allocator;
-const c_allocator = std.heap.c_allocator;
 
 const VkAssert = vk_ctx.VkAssert;
 const BaseDispatch = vk_ctx.BaseDispatch;
@@ -159,9 +158,12 @@ const HelloTriangleApplication = struct {
         glfw.terminate();
         std.log.debug("Terminated GLFW", .{});
 
+        self.allocator.free(self.image_available_semaphores);
+        self.allocator.free(self.render_finished_semaphores);
+        self.allocator.free(self.in_flight_fences);
+
         self.allocator.free(self.command_buffers);
-        self.allocator.free(self.swapchain_image_views);
-        self.allocator.free(self.swapchain_images);
+
         self.instance_extensions.deinit();
     }
 
@@ -265,8 +267,8 @@ const HelloTriangleApplication = struct {
         var result = try self.vkb.enumerateInstanceLayerProperties(&layer_count, null);
         try VkAssert.withMessage(result, "Failed to enumerate instance layer properties.");
 
-        const available_layers = try c_allocator.alloc(vk.LayerProperties, layer_count);
-        defer c_allocator.free(available_layers);
+        const available_layers = try self.allocator.alloc(vk.LayerProperties, layer_count);
+        defer self.allocator.free(available_layers);
 
         result = try self.vkb.enumerateInstanceLayerProperties(&layer_count, @ptrCast(available_layers));
         try VkAssert.withMessage(result, "Failed to enumerate instance layer properties.");
@@ -453,6 +455,7 @@ const HelloTriangleApplication = struct {
         }
 
         var queue_create_infos = try self.allocator.alloc(vk.DeviceQueueCreateInfo, unique_queue_families.items.len);
+        defer self.allocator.free(queue_create_infos);
 
         const queue_priority: f32 = 1.0;
         for (unique_queue_families.items, 0..) |queue_family, i| {
@@ -494,6 +497,10 @@ const HelloTriangleApplication = struct {
         }
 
         self.vkd.destroySwapchainKHR(self.device, self.swapchain, null);
+
+        self.allocator.free(self.swapchain_image_views);
+        self.allocator.free(self.swapchain_images);
+        self.allocator.free(self.swapchain_framebuffers);
     }
 
     fn recreateSwapchain(self: *Self) !void {
@@ -1075,7 +1082,11 @@ fn cStringEql(str_1: [*:0]const u8, str_2: [*]const u8) bool {
 }
 
 pub fn main() !void {
-    var app = HelloTriangleApplication.init(c_allocator);
+    var dba = std.heap.DebugAllocator(.{}){};
+    defer _ = dba.deinit();
+    const allocator = dba.allocator();
+
+    var app = HelloTriangleApplication.init(allocator);
     defer app.deinit();
     try app.run();
 }
