@@ -1426,8 +1426,34 @@ const VulkanApplication = struct {
     }
 
     fn loadModel(self: *Self) !void {
+        // Custom hash function for Vertex struct
+        // becuase floats are not supported by default
+        const VertexHashContext = struct {
+            pub fn hash(_: @This(), s: Vertex) usize {
+                var h: isize = 17;
+                h = h *% 31 +% @as(isize, @intFromFloat(s.pos.x()));
+                h = h *% 31 +% @as(isize, @intFromFloat(s.pos.y()));
+                h = h *% 31 +% @as(isize, @intFromFloat(s.pos.z()));
+                h = h *% 31 +% @as(isize, @intFromFloat(s.tex_coord.x()));
+                h = h *% 31 +% @as(isize, @intFromFloat(s.tex_coord.y()));
+                return @bitCast(h);
+            }
+
+            pub fn eql(_: @This(), a: Vertex, b: Vertex) bool {
+                return std.meta.eql(a, b);
+            }
+        };
+
         self.vertices = std.ArrayList(Vertex).init(self.allocator);
         self.indices = std.ArrayList(u32).init(self.allocator);
+
+        var vertices_map = std.HashMap(
+            Vertex,
+            u32,
+            VertexHashContext,
+            std.hash_map.default_max_load_percentage,
+        ).init(self.allocator);
+        defer vertices_map.deinit();
 
         var model = try obj.parseObj(self.allocator, @embedFile(model_path));
         defer model.deinit(self.allocator);
@@ -1436,9 +1462,9 @@ const VulkanApplication = struct {
             for (mesh.indices) |index| {
                 const vertex = Vertex{
                     .pos = Vec3.new(
+                        model.vertices[3 * index.vertex.? + 0],
                         model.vertices[3 * index.vertex.? + 1],
                         model.vertices[3 * index.vertex.? + 2],
-                        model.vertices[3 * index.vertex.? + 0],
                     ),
                     .tex_coord = Vec2.new(
                         model.tex_coords[2 * index.tex_coord.? + 0],
@@ -1447,11 +1473,16 @@ const VulkanApplication = struct {
                     .color = Vec3.new(1.0, 1.0, 1.0),
                 };
 
-                try self.vertices.append(vertex);
-                try self.indices.append(@intCast(self.indices.items.len));
+                if (vertices_map.get(vertex) == null) {
+                    try vertices_map.put(vertex, @intCast(self.vertices.items.len));
+                    try self.vertices.append(vertex);
+                }
+
+                try self.indices.append(vertices_map.get(vertex).?);
             }
         }
 
+        std.log.debug("Vertices: {d}", .{self.vertices.items.len});
         std.log.debug("Loaded model", .{});
     }
 
@@ -1929,13 +1960,11 @@ const VulkanApplication = struct {
         const time = @as(f32, @floatFromInt(current_time - start_time)) / std.time.ns_per_s;
 
         const ubo = UniformBufferObject{
-            // Changed for Y up
-            .model = Mat4.fromRotation(@sin(time) * 15.0, Vec3.new(0.0, 1.0, 0.0)),
+            .model = Mat4.fromRotation(@sin(time) * 20.0, Vec3.new(0.0, 0.0, 1.0)),
             .view = za.lookAt(
                 Vec3.new(2.0, 2.0, 2.0),
                 Vec3.new(0.0, 0.0, 0.0),
-                // Changed for Y up
-                Vec3.new(0.0, 1.0, 0.0),
+                Vec3.new(0.0, 0.0, 1.0),
             ),
             // This is different from tutorial
             // Check function definition for more info
