@@ -1430,13 +1430,13 @@ const VulkanApplication = struct {
         // becuase floats are not supported by default
         const VertexHashContext = struct {
             pub fn hash(_: @This(), s: Vertex) usize {
-                var h: isize = 17;
-                h = h *% 31 +% @as(isize, @intFromFloat(s.pos.x()));
-                h = h *% 31 +% @as(isize, @intFromFloat(s.pos.y()));
-                h = h *% 31 +% @as(isize, @intFromFloat(s.pos.z()));
-                h = h *% 31 +% @as(isize, @intFromFloat(s.tex_coord.x()));
-                h = h *% 31 +% @as(isize, @intFromFloat(s.tex_coord.y()));
-                return @bitCast(h);
+                var h: usize = 17;
+                h = h *% 31 +% @as(u32, @bitCast(s.pos.x()));
+                h = h *% 31 +% @as(u32, @bitCast(s.pos.y()));
+                h = h *% 31 +% @as(u32, @bitCast(s.pos.z()));
+                h = h *% 31 +% @as(u32, @bitCast(s.tex_coord.x()));
+                h = h *% 31 +% @as(u32, @bitCast(s.tex_coord.y()));
+                return h;
             }
 
             pub fn eql(_: @This(), a: Vertex, b: Vertex) bool {
@@ -1482,8 +1482,8 @@ const VulkanApplication = struct {
             }
         }
 
-        std.log.debug("Vertices: {d}", .{self.vertices.items.len});
         std.log.debug("Loaded model", .{});
+        std.log.debug("Vertices: {d}", .{self.vertices.items.len});
     }
 
     fn createVertexBuffer(self: *Self) !void {
